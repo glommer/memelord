@@ -1,0 +1,14 @@
+{
+  "name": "memelord-cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "memelord": "src/index.ts"
+  },
+  "dependencies": {
+    "memelord": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@huggingface/transformers": "^3.4.0",
+    "zod": "^3.24.0"
+  }
+}
