@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "memelord": {
+      "command": "bun",
+      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/packages/cli/src/index.ts"],
+      "env": {
+        "MEMELORD_DIR": "${CLAUDE_PLUGIN_ROOT}/.memelord"
+      }
+    }
+  }
+}

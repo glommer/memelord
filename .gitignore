@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.memelord/
+*.db
+*.db-wal
+*.db-shm
+bun.lock
+benchmark/.turso-workdir/
+benchmark/results/
