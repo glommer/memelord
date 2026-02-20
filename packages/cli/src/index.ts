@@ -259,7 +259,7 @@ if (command === "hook") {
 
 } else if (command === "init") {
   // -------------------------------------------------------------------------
-  // memelord init — one-shot setup for Claude Code, Codex, and OpenCode
+  // memelord init — one-shot setup for Claude Code, Codex, OpenCode, and OpenClaw
   // -------------------------------------------------------------------------
   const targetDir = resolve(process.argv[3] ?? ".");
   const cli = getCliCommand();
@@ -335,7 +335,24 @@ enabled = true
   writeFileSync(opencodePath, JSON.stringify(opencodeConfig, null, 2) + "\n");
   console.log("  Wrote opencode.json (OpenCode)");
 
-  // 6. Claude Code hooks — ~/.claude/settings.json
+  // 6. OpenClaw — config/mcporter.json
+  const mcporterDir = join(targetDir, "config");
+  if (!existsSync(mcporterDir)) mkdirSync(mcporterDir, { recursive: true });
+  const mcporterPath = join(mcporterDir, "mcporter.json");
+  let mcporterConfig: any = {};
+  if (existsSync(mcporterPath)) {
+    try { mcporterConfig = JSON.parse(readFileSync(mcporterPath, "utf-8")); } catch {}
+  }
+  if (!mcporterConfig.mcpServers) mcporterConfig.mcpServers = {};
+  mcporterConfig.mcpServers.memelord = {
+    command: cli.command,
+    args: [...cli.args, "serve"],
+    env: { MEMELORD_DIR: join(targetDir, ".memelord") },
+  };
+  writeFileSync(mcporterPath, JSON.stringify(mcporterConfig, null, 2) + "\n");
+  console.log("  Wrote config/mcporter.json (OpenClaw)");
+
+  // 7. Claude Code hooks — ~/.claude/settings.json
   const settingsPath = join(process.env.HOME ?? "~", ".claude", "settings.json");
   if (existsSync(settingsPath)) {
     let settings: any = {};
@@ -382,7 +399,7 @@ enabled = true
   console.log(`memelord - Persistent memory system for coding agents
 
 Usage:
-  memelord init [dir]           Set up memelord for a project (Claude Code, Codex, OpenCode)
+  memelord init [dir]           Set up memelord for a project (Claude Code, Codex, OpenCode, OpenClaw)
   memelord serve                Start the MCP server (default)
   memelord hook <event>         Run a hook (session-start, post-tool-use, stop, session-end)
   memelord status               Overview: counts, categories, top memories

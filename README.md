@@ -98,8 +98,25 @@ The hooks handle the heavy lifting. At session start, relevant memories are inje
 `memelord init` also configures:
 - `.codex/config.toml` for [Codex](https://github.com/openai/codex)
 - `opencode.json` for [OpenCode](https://github.com/opencode-ai/opencode)
+- `config/mcporter.json` for [OpenClaw](https://github.com/openclaw/openclaw) (via [mcporter](https://mcporter.dev))
 
 These get the MCP server but not hooks (hooks are Claude Code-specific). The MCP tools still work -- the agent just doesn't get automatic lifecycle instrumentation.
+
+#### OpenClaw setup
+
+OpenClaw connects to MCP servers via mcporter. Make sure mcporter is installed:
+
+```bash
+npm install -g mcporter
+```
+
+After `memelord init`, verify the tools are available:
+
+```bash
+mcporter list memelord
+```
+
+You should see all 5 memory tools. OpenClaw's mcporter skill will automatically discover and use them during agent sessions.
 
 ## MCP tools
 
