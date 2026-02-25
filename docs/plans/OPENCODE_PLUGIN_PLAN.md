@@ -405,14 +405,14 @@ Inside the plugin template file `packages/cli/src/opencode/plugin-template.ts`, 
 
 This is the same pure algorithm as CC (`packages/cli/src/claude/hooks.ts:159-198`):
 
-- [ ] `function detectCorrections(sequence: Array<{ tool: string; input: any; failed: boolean }>): Array<{ failedTool: string; failedInput: string; succeededTool: string; succeededInput: string }>`
-- [ ] For each entry `i` in the sequence where `sequence[i].failed === true`:
-  - [ ] Look ahead at entries `j` from `i+1` to `Math.min(i + 4, sequence.length)` (exclusive) — this is a 3-step lookahead window
-  - [ ] If `sequence[j].tool === sequence[i].tool` AND `!sequence[j].failed`:
-    - [ ] Stringify both inputs: if input is a string, use as-is; otherwise `JSON.stringify(input).slice(0, 200)`
-    - [ ] If `failedInput !== succeededInput` (it's a genuine correction, not just a retry): push `{ failedTool, failedInput, succeededTool, succeededInput }` to results
-    - [ ] `break` the inner loop (only match the first correction for each failure)
-- [ ] Return the corrections array
+- [x] `function detectCorrections(sequence: Array<{ tool: string; input: any; failed: boolean }>): Array<{ failedTool: string; failedInput: string; succeededTool: string; succeededInput: string }>`
+- [x] For each entry `i` in the sequence where `sequence[i].failed === true`:
+- [x] Look ahead at entries `j` from `i+1` to `Math.min(i + 4, sequence.length)` (exclusive) — this is a 3-step lookahead window
+- [x] If `sequence[j].tool === sequence[i].tool` AND `!sequence[j].failed`:
+  - [x] Stringify both inputs: if input is a string, use as-is; otherwise `JSON.stringify(input).slice(0, 200)`
+  - [x] If `failedInput !== succeededInput` (it's a genuine correction, not just a retry): push `{ failedTool, failedInput, succeededTool, succeededInput }` to results
+  - [x] `break` the inner loop (only match the first correction for each failure)
+- [x] Return the corrections array
 
 #### 5.3 Define `sumTokensFromOC` function
 
@@ -444,26 +444,26 @@ This is the same pure algorithm as CC (`packages/cli/src/claude/hooks.ts:159-198
 
 Same pure algorithm as CC (`packages/cli/src/claude/hooks.ts:295-308`):
 
-- [ ] `function buildDiscoverySummary(texts: string[]): string | null`
-- [ ] If `texts.length === 0`, return `null`
-- [ ] Sort texts by length descending, take top 5: `const topBlocks = sorted.slice(0, 5)`
-- [ ] Take last 2 from original order: `const lastBlocks = texts.slice(-2)`
-- [ ] Combine into a Set for deduplication: `new Set([...topBlocks, ...lastBlocks])`
-- [ ] Rebuild in original order: `texts.filter(t => combined.has(t))`
-- [ ] Join with `"\n\n"`, each block truncated to 500 chars: `ordered.map(t => t.slice(0, 500)).join("\n\n")`
-- [ ] If total summary length < 100, return `null`
-- [ ] Return `summary.slice(0, 2000)`
+- [x] `function buildDiscoverySummary(texts: string[]): string | null`
+- [x] If `texts.length === 0`, return `null`
+- [x] Sort texts by length descending, take top 5: `const topBlocks = sorted.slice(0, 5)`
+- [x] Take last 2 from original order: `const lastBlocks = texts.slice(-2)`
+- [x] Combine into a Set for deduplication: `new Set([...topBlocks, ...lastBlocks])`
+- [x] Rebuild in original order: `texts.filter(t => combined.has(t))`
+- [x] Join with `"\n\n"`, each block truncated to 500 chars: `ordered.map(t => t.slice(0, 500)).join("\n\n")`
+- [x] If total summary length < 100, return `null`
+- [x] Return `summary.slice(0, 2000)`
 
 #### 5.7 Define `analyzeFailurePatterns` function
 
-- [ ] `function analyzeFailurePatterns(failuresJsonl: string): Array<{ content: string; category: "correction"; weight: number }>`
-- [ ] Parse the JSONL string: split by `"\n"`, filter empty lines, parse each as JSON, skip parse errors. Each line has shape `{ timestamp, tool_name, tool_input, error_summary }`.
-- [ ] Group by `tool_name` using a `Map<string, number>` for counts
-- [ ] For each tool with count >= 3:
-  - [ ] Collect first 2 failure examples for that tool: `failures.filter(f => f.tool_name === tool).slice(0, 2).map(f => f.error_summary.slice(0, 100)).join("; ")`
-  - [ ] Build content string: `` `Repeated failures with ${tool} (${count}x in session): ${examples}` ``
-  - [ ] Push `{ content, category: "correction", weight: 1.0 }` to results
-- [ ] Return the array
+- [x] `function analyzeFailurePatterns(failuresJsonl: string): Array<{ content: string; category: "correction"; weight: number }>`
+- [x] Parse the JSONL string: split by `"\n"`, filter empty lines, parse each as JSON, skip parse errors. Each line has shape `{ timestamp, tool_name, tool_input, error_summary }`.
+- [x] Group by `tool_name` using a `Map<string, number>` for counts
+- [x] For each tool with count >= 3:
+  - [x] Collect first 2 failure examples for that tool: `failures.filter(f => f.tool_name === tool).slice(0, 2).map(f => f.error_summary.slice(0, 100)).join("; ")`
+  - [x] Build content string: `` `Repeated failures with ${tool} (${count}x in session): ${examples}` ``
+  - [x] Push `{ content, category: "correction", weight: 1.0 }` to results
+- [x] Return the array
 
 #### 5.8 Implement the `session.idle` event handler — transcript analysis
 
@@ -874,11 +874,11 @@ The pure-logic functions defined in Phases 3-5 (`buildSessionStartContext`, `det
 
 Since the plugin template is now a **real TypeScript file** (not a template string), its pure functions are directly importable for testing. No separate `plugin-functions.ts` extraction is needed — the functions live in `packages/cli/src/opencode/plugin-template.ts` and can be imported directly.
 
-- [ ] Verify that the pure functions in `packages/cli/src/opencode/plugin-template.ts` are exported (or can be imported) for testing:
-  - [ ] `buildSessionStartContext`
-  - [ ] `detectCorrections`
-  - [ ] `buildDiscoverySummary`
-  - [ ] `analyzeFailurePatterns`
+- [x] Verify that the pure functions in `packages/cli/src/opencode/plugin-template.ts` are exported (or can be imported) for testing:
+  - [x] `buildSessionStartContext`
+  - [x] `detectCorrections`
+  - [x] `buildDiscoverySummary`
+  - [x] `analyzeFailurePatterns`
 - [ ] If the functions are not exported from the plugin template (because the generated file shouldn't have extra exports), create a thin re-export file `packages/cli/src/opencode/plugin-functions.ts` that imports and re-exports them:
   ```ts
   export {
@@ -893,54 +893,54 @@ Since the plugin template is now a **real TypeScript file** (not a template stri
 
 #### 8.2 Write context builder tests
 
-- [ ] Create `test/opencode-plugin/context-builder.test.ts` using `bun:test`
-- [ ] Test: empty memories array returns only the instructions section (no "# Memories from past sessions" header)
-- [ ] Test: single memory returns correct format: `[correction] (id: abc, weight: 1.50)\nThe lesson content\n\n` followed by instructions
-- [ ] Test: multiple memories are listed in order with correct formatting
-- [ ] Test: weight formatting uses exactly 2 decimal places (`toFixed(2)`)
-- [ ] Test: instructions section contains all 6 numbered items (`memory_start_task`, `memory_report` x3, `memory_contradict`, `memory_end_task`)
-- [ ] Test: output matches the CC version by feeding the same mock memories to both `buildSessionStartContext` (from OC functions) and manually comparing to the CC `hookSessionStart` output string construction (from `packages/cli/src/claude/hooks.ts:77-99`)
+- [x] Create `test/opencode-plugin/context-builder.test.ts` using `bun:test`
+- [x] Test: empty memories array returns only the instructions section (no "# Memories from past sessions" header)
+- [x] Test: single memory returns correct format: `[correction] (id: abc, weight: 1.50)\nThe lesson content\n\n` followed by instructions
+- [x] Test: multiple memories are listed in order with correct formatting
+- [x] Test: weight formatting uses exactly 2 decimal places (`toFixed(2)`)
+- [x] Test: instructions section contains all 6 numbered items (`memory_start_task`, `memory_report` x3, `memory_contradict`, `memory_end_task`)
+- [x] Test: output matches the CC version by feeding the same mock memories to both `buildSessionStartContext` (from OC functions) and manually comparing to the CC `hookSessionStart` output string construction (from `packages/cli/src/claude/hooks.ts:77-99`)
 
 #### 8.3 Write correction detector tests
 
-- [ ] Create `test/opencode-plugin/correction-detector.test.ts` using `bun:test`
-- [ ] Test: empty sequence returns empty corrections array
-- [ ] Test: all-successful sequence returns empty corrections array
-- [ ] Test: single failure with no subsequent success returns empty array
-- [ ] Test: failure followed immediately by same tool success with different input returns one correction
-- [ ] Test: failure followed by same tool success with SAME input returns empty (not a correction, just a retry)
-- [ ] Test: failure followed by DIFFERENT tool success returns empty (tools don't match)
-- [ ] Test: failure followed by success 3 steps later (within window) still detects correction
-- [ ] Test: failure followed by success 4 steps later (outside window) does NOT detect correction
-- [ ] Test: multiple corrections in one sequence are all detected
-- [ ] Test: input stringification — object inputs are JSON.stringified and truncated to 200 chars
+- [x] Create `test/opencode-plugin/correction-detector.test.ts` using `bun:test`
+- [x] Test: empty sequence returns empty corrections array
+- [x] Test: all-successful sequence returns empty corrections array
+- [x] Test: single failure with no subsequent success returns empty array
+- [x] Test: failure followed immediately by same tool success with different input returns one correction
+- [x] Test: failure followed by same tool success with SAME input returns empty (not a correction, just a retry)
+- [x] Test: failure followed by DIFFERENT tool success returns empty (tools don't match)
+- [x] Test: failure followed by success 3 steps later (within window) still detects correction
+- [x] Test: failure followed by success 4 steps later (outside window) does NOT detect correction
+- [x] Test: multiple corrections in one sequence are all detected
+- [x] Test: input stringification — object inputs are JSON.stringified and truncated to 200 chars
 
 #### 8.4 Write discovery summary tests
 
-- [ ] Create `test/opencode-plugin/discovery-detector.test.ts` using `bun:test`
-- [ ] Test: empty texts array returns null
-- [ ] Test: texts with total summary < 100 chars returns null
-- [ ] Test: takes top 5 by length + last 2, deduplicates, preserves original order
-- [ ] Test: each block is truncated to 500 chars before joining
-- [ ] Test: total summary is capped at 2000 chars
-- [ ] Test: blocks are joined with `"\n\n"`
+- [x] Create `test/opencode-plugin/discovery-detector.test.ts` using `bun:test`
+- [x] Test: empty texts array returns null
+- [x] Test: texts with total summary < 100 chars returns null
+- [x] Test: takes top 5 by length + last 2, deduplicates, preserves original order
+- [x] Test: each block is truncated to 500 chars before joining
+- [x] Test: total summary is capped at 2000 chars
+- [x] Test: blocks are joined with `"\n\n"`
 
 #### 8.5 Write failure pattern analyzer tests
 
-- [ ] Create `test/opencode-plugin/failure-analyzer.test.ts` using `bun:test`
-- [ ] Test: empty JSONL string returns empty array
-- [ ] Test: malformed JSONL lines are skipped without error
-- [ ] Test: tool with 2 failures (below threshold) returns empty array
-- [ ] Test: tool with 3 failures returns one memory candidate with content `"Repeated failures with {tool} (3x in session): {example1}; {example2}"`
-- [ ] Test: tool with 5 failures still only includes 2 example error summaries (`.slice(0, 2)`)
-- [ ] Test: error summaries in examples are truncated to 100 chars
-- [ ] Test: multiple tools each with >= 3 failures produce multiple candidates
-- [ ] Test: returned candidates have `category: "correction"` and `weight: 1.0`
+- [x] Create `test/opencode-plugin/failure-analyzer.test.ts` using `bun:test`
+- [x] Test: empty JSONL string returns empty array
+- [x] Test: malformed JSONL lines are skipped without error
+- [x] Test: tool with 2 failures (below threshold) returns empty array
+- [x] Test: tool with 3 failures returns one memory candidate with content `"Repeated failures with {tool} (3x in session): {example1}; {example2}"`
+- [x] Test: tool with 5 failures still only includes 2 example error summaries (`.slice(0, 2)`)
+- [x] Test: error summaries in examples are truncated to 100 chars
+- [x] Test: multiple tools each with >= 3 failures produce multiple candidates
+- [x] Test: returned candidates have `category: "correction"` and `weight: 1.0`
 
 #### 8.6 Add test script to package.json
 
-- [ ] Ensure root `package.json` has a `"test"` script: `"test": "bun test test/"`
-- [ ] Run `bun test` and verify all new tests pass alongside existing tests
+- [x] Ensure root `package.json` has a `"test"` script: `"test": "bun test test/"`
+- [x] Run `bun test` and verify all new tests pass alongside existing tests
 
 ---
 

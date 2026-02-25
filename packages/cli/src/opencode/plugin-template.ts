@@ -140,6 +140,114 @@ You have a persistent memory system available via MCP tools. Use it:
   return context;
 }
 
+export type ToolSequenceEntry = { tool: string; input: any; failed: boolean };
+
+export type Correction = {
+  failedTool: string;
+  failedInput: string;
+  succeededTool: string;
+  succeededInput: string;
+};
+
+export function detectCorrections(sequence: ToolSequenceEntry[]): Correction[] {
+  const corrections: Correction[] = [];
+
+  for (let i = 0; i < sequence.length - 1; i++) {
+    if (!sequence[i].failed) continue;
+
+    for (let j = i + 1; j < Math.min(i + 4, sequence.length); j++) {
+      if (sequence[j].tool === sequence[i].tool && !sequence[j].failed) {
+        const failedInput =
+          typeof sequence[i].input === "string"
+            ? sequence[i].input
+            : JSON.stringify(sequence[i].input).slice(0, 200);
+        const succeededInput =
+          typeof sequence[j].input === "string"
+            ? sequence[j].input
+            : JSON.stringify(sequence[j].input).slice(0, 200);
+
+        if (failedInput !== succeededInput) {
+          corrections.push({
+            failedTool: sequence[i].tool,
+            failedInput,
+            succeededTool: sequence[j].tool,
+            succeededInput,
+          });
+        }
+
+        break;
+      }
+    }
+  }
+
+  return corrections;
+}
+
+export function buildDiscoverySummary(texts: string[]): string | null {
+  if (texts.length === 0) return null;
+
+  const sorted = [...texts].sort((a, b) => b.length - a.length);
+  const combined = new Set([...sorted.slice(0, 5), ...texts.slice(-2)]);
+  const ordered = texts.filter((t) => combined.has(t));
+  const summary = ordered.map((t) => t.slice(0, 500)).join("\n\n");
+
+  if (summary.length < 100) return null;
+  return summary.slice(0, 2000);
+}
+
+type FailureJsonlEntry = {
+  tool_name?: unknown;
+  error_summary?: unknown;
+};
+
+export function analyzeFailurePatterns(
+  failuresJsonl: string,
+): Array<{ content: string; category: "correction"; weight: number }> {
+  const lines = failuresJsonl.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return [];
+
+  const failures: Array<{ tool_name: string; error_summary: string }> = [];
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line) as FailureJsonlEntry;
+      if (!isRecord(parsed)) continue;
+
+      const tool = parsed.tool_name;
+      const summary = parsed.error_summary;
+      if (typeof tool !== "string" || tool.length === 0) continue;
+      if (typeof summary !== "string") continue;
+
+      failures.push({ tool_name: tool, error_summary: summary });
+    } catch {
+      // Ignore malformed lines.
+    }
+  }
+
+  if (failures.length === 0) return [];
+
+  const counts = new Map<string, number>();
+  for (const f of failures) counts.set(f.tool_name, (counts.get(f.tool_name) ?? 0) + 1);
+
+  const result: Array<{ content: string; category: "correction"; weight: number }> = [];
+  for (const [tool, count] of counts) {
+    if (count < 3) continue;
+
+    const examples = failures
+      .filter((f) => f.tool_name === tool)
+      .slice(0, 2)
+      .map((f) => f.error_summary.slice(0, 100))
+      .join("; ");
+
+    result.push({
+      content: `Repeated failures with ${tool} (${count}x in session): ${examples}`,
+      category: "correction",
+      weight: 1.0,
+    });
+  }
+
+  return result;
+}
+
 const sessionMeta: Record<string, { injectedMemoryIds: string[]; startedAt: number }> = {};
 let lastEmbedDecayPid: number | null = null;
 
