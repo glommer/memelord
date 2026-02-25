@@ -33,23 +33,6 @@ function createLightStore(sessionId: string): MemoryStore {
   });
 }
 
-export function isOpenCodeToolFailure(toolName: string, outputStr: string, metadata: any): boolean {
-  void toolName;
-
-  if (metadata && typeof metadata === "object") {
-    if (typeof metadata.exit === "number" && metadata.exit !== 0) return true;
-    if (typeof metadata.exitCode === "number" && metadata.exitCode !== 0) return true;
-    if (metadata.success === false) return true;
-    if (metadata.isError === true) return true;
-  }
-
-  // Fallback: some tools surface errors only via the normalized output string.
-  const checkStr = (outputStr ?? "").slice(0, 200);
-  if (checkStr.startsWith("Error:") || checkStr.startsWith("error:")) return true;
-
-  return false;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object";
 }
@@ -124,22 +107,6 @@ export function formatFailureEntryFromSummary(
   };
 }
 
-export function formatFailureEntry(
-  toolName: string,
-  toolInput: any,
-  outputStr: string,
-  metadata: any,
-): { timestamp: number; tool_name: string; tool_input: any; error_summary: string } {
-  const meta = metadata && typeof metadata === "object" ? metadata : null;
-  const errorSummary = (meta?.error ?? meta?.message ?? outputStr ?? "").slice(0, 500);
-  return {
-    timestamp: Math.floor(Date.now() / 1000),
-    tool_name: toolName,
-    tool_input: toolInput,
-    error_summary: errorSummary,
-  };
-}
-
 const sessionMeta: Record<string, { injectedMemoryIds: string[]; startedAt: number }> = {};
 let lastEmbedDecayPid: number | null = null;
 
@@ -168,33 +135,23 @@ export const MemelordPlugin: Plugin = async ({ client, directory, worktree }: Pl
         const sessionID = input?.sessionID ?? "unknown";
         const callID = input?.callID;
 
-        // Prefer typesafe failure detection by looking up the ToolPart state.
-        if (typeof callID === "string" && callID.length > 0) {
-          const resp = await client.session.messages({
-            path: { id: sessionID },
-            query: { limit: 50 },
-          });
-          const messages = resp.data ?? [];
+        void output;
 
-          const toolPart = findToolPartByCallID(messages, callID);
-          if (toolPart) {
-            const summary = getOpenCodeToolFailureSummaryFromState(toolPart.state);
-            if (!summary) return;
+        if (typeof callID !== "string" || callID.length === 0) return;
 
-            const entry = formatFailureEntryFromSummary(toolName, toolPart.state.input, summary);
-            const failuresFile = join(getSessionsDir(), `${sessionID}.failures.jsonl`);
-            appendFileSync(failuresFile, JSON.stringify(entry) + "\n");
-            return;
-          }
-        }
+        const resp = await client.session.messages({
+          path: { id: sessionID },
+          query: { limit: 200 },
+        });
+        const messages = resp.data ?? [];
 
-        // Fallback: rely on normalized output + metadata from the hook.
-        const toolInput = input?.args;
-        const outputStr = output?.output ?? "";
-        const metadata = output?.metadata;
-        if (!isOpenCodeToolFailure(toolName, outputStr, metadata)) return;
+        const toolPart = findToolPartByCallID(messages, callID);
+        if (!toolPart) return;
 
-        const entry = formatFailureEntry(toolName, toolInput, outputStr, metadata);
+        const summary = getOpenCodeToolFailureSummaryFromState(toolPart.state);
+        if (!summary) return;
+
+        const entry = formatFailureEntryFromSummary(toolName, toolPart.state.input, summary);
         const failuresFile = join(getSessionsDir(), `${sessionID}.failures.jsonl`);
         appendFileSync(failuresFile, JSON.stringify(entry) + "\n");
       } catch (e: any) {

@@ -92,7 +92,7 @@ The `bash` tool always sets `state.status = "completed"` even on failure. The ex
 }
 ```
 
-**Implication for `tool.execute.after` hook:** The hook receives `output: { title, output, metadata }`. For Pattern A tools, the `output.output` field contains the error string. For Pattern B (bash), `output.output` contains stderr/stdout and `output.metadata.exit` is the exit code. The `isOpenCodeToolFailure` function must check **both** `metadata.exit` and `metadata.exitCode` for resilience against API changes.
+**Implication for `tool.execute.after` hook:** The hook receives `output: { title, output, metadata }`, but it does not carry a typed `status`. For robust failure detection, look up the corresponding `ToolPart` by `callID` via `client.session.messages()` and branch on `ToolState.status` (`"error"` vs `"completed"`). For bash, treat non-zero `state.metadata.exit` (and fallback `exitCode`) as failure.
 
 #### 1.3 Event shapes (confirmed from SDK types)
 
@@ -303,45 +303,28 @@ The `output.output` field is always a string. The `output.metadata` field is an 
 
 ### Tasks
 
-#### 4.1 Define the `isOpenCodeToolFailure` function
+#### 4.1 Define ToolState-based failure detection helpers
 
 Inside the plugin template file `packages/cli/src/opencode/plugin-template.ts` (before the plugin export), define:
 
-- [x] `function isOpenCodeToolFailure(toolName: string, outputStr: string, metadata: any): boolean`
-- [x] The function checks these conditions (any match returns `true`):
-  - [x] **String error patterns on `outputStr`:** Only check the first 200 chars to avoid false positives on file-content tools like `read`:
-    ```ts
-    const checkStr = outputStr.slice(0, 200)
-    ```
-    - `checkStr.startsWith("Error:")` or `checkStr.startsWith("error:")`
-    - `checkStr.includes("ENOENT")`
-    - `checkStr.includes("command not found")`
-    - `checkStr.includes("No such file")`
-    - `checkStr.includes("Permission denied")`
-  - [x] **Metadata checks (if `metadata` is a non-null object):**
-    - `typeof metadata.exit === "number" && metadata.exit !== 0` — **primary** bash exit code field per Phase 1 findings
-    - `typeof metadata.exitCode === "number" && metadata.exitCode !== 0` — **fallback** in case API changes
-    - `metadata.success === false`
-    - `metadata.isError === true`
-  - [x] If none match, return `false`
+- [x] `function getOpenCodeToolFailureSummaryFromState(state: ToolState): string | null`
+- [x] Treat `state.status === "error"` as failure (use `state.error`)
+- [x] Treat `state.status === "completed"` as failure if `metadata.exit` (or fallback `metadata.exitCode`) is non-zero
 
-#### 4.2 Define the `formatFailureEntry` function
+#### 4.2 Define tool-part lookup + failure entry formatting
 
-- [x] `function formatFailureEntry(toolName: string, toolInput: any, outputStr: string, metadata: any): { timestamp: number; tool_name: string; tool_input: any; error_summary: string }`
-- [x] `timestamp`: `Math.floor(Date.now() / 1000)`
-- [x] `tool_name`: `toolName`
-- [x] `tool_input`: `toolInput` (pass through as-is — this is the `input.args` from the hook)
-- [x] `error_summary`: Extract from metadata first, then fall back to output string: `metadata?.error ?? metadata?.message ?? outputStr.slice(0, 500)`
-- [x] The output format matches CC's failure JSONL format exactly (`{ timestamp, tool_name, tool_input, error_summary }`) so Phase 5's failure pattern analyzer can read it identically.
+- [x] `function findToolPartByCallID(messages: Array<{ info: any; parts: Part[] }>, callID: string): ToolPart | null`
+- [x] `function formatFailureEntryFromSummary(toolName: string, toolInput: any, errorSummary: string): { timestamp: number; tool_name: string; tool_input: any; error_summary: string }`
+- [x] Output format matches CC's failure JSONL format exactly (`{ timestamp, tool_name, tool_input, error_summary }`) so Phase 5's failure pattern analyzer can read it identically.
 
 #### 4.3 Implement the `tool.execute.after` handler
 
 Inside the plugin's `"tool.execute.after"` handler:
 
 - [x] **Destructure params:** The handler signature is `async (input, output) => { ... }` where `input` has `{ tool, sessionID, callID, args }` and `output` has `{ title, output: string, metadata }`.
-- [x] **Call failure detector:** `if (!isOpenCodeToolFailure(input.tool, output.output, output.metadata)) return` — fast exit on success.
-- [x] **Build failure entry:** `const entry = formatFailureEntry(input.tool, input.args, output.output, output.metadata)`
-- [x] **Append to JSONL:** `appendFileSync(join(getSessionsDir(), \`${input.sessionID}.failures.jsonl\`), JSON.stringify(entry) + "\\n")`
+- [x] **Look up tool part by call ID:** fetch `client.session.messages({ path: { id: sessionID } })` and find `ToolPart` where `part.callID === input.callID`.
+- [x] **Call ToolState-based failure detector:** `const summary = getOpenCodeToolFailureSummaryFromState(toolPart.state)`; fast exit if `null`.
+- [x] **Append to JSONL:** `appendFileSync(join(getSessionsDir(), \`${input.sessionID}.failures.jsonl\`), JSON.stringify(formatFailureEntryFromSummary(input.tool, toolPart.state.input, summary)) + "\\n")`
 - [x] **Error handling:** Wrap the entire handler body in try/catch. On error, `console.error(\`memelord PostToolUse error: ${e.message}\`)`. Never throw.
 
 ---
@@ -1043,4 +1026,4 @@ OC equivalent: `AssistantMessage.tokens.input + tokens.output + tokens.cache.wri
 
 ### Failure detection: metadata.exit vs metadata.exitCode
 
-Per Phase 1 findings, the OpenCode bash tool uses `metadata.exit` (not `exitCode`) for the process exit code. For resilience against API changes, the `isOpenCodeToolFailure` function checks both `metadata.exit` and `metadata.exitCode`. The same dual-check is applied in `extractToolSequencesFromOC` when determining if a completed tool call failed.
+Per Phase 1 findings, the OpenCode bash tool uses `metadata.exit` (not `exitCode`) for the process exit code. For resilience against API changes, failure detection checks both `metadata.exit` and `metadata.exitCode`. The same dual-check is applied in `extractToolSequencesFromOC` when determining if a completed tool call failed.

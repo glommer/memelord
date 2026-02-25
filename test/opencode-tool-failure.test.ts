@@ -4,10 +4,8 @@ import type { ToolState } from "@opencode-ai/sdk";
 
 import {
   findToolPartByCallID,
-  formatFailureEntry,
   formatFailureEntryFromSummary,
   getOpenCodeToolFailureSummaryFromState,
-  isOpenCodeToolFailure,
 } from "../packages/cli/src/opencode/plugin-template";
 
 describe("OpenCode failure detection", () => {
@@ -39,6 +37,26 @@ describe("OpenCode failure detection", () => {
       time: { start: 0, end: 1 },
     };
     expect(getOpenCodeToolFailureSummaryFromState(badCompleted)).toContain("failed");
+
+    const badCompletedNoOutput: ToolState = {
+      status: "completed",
+      input: { command: "exit 7" },
+      output: "",
+      title: "bash",
+      metadata: { exitCode: 7 },
+      time: { start: 0, end: 1 },
+    };
+    expect(getOpenCodeToolFailureSummaryFromState(badCompletedNoOutput)).toContain("exit code 7");
+
+    const completedMetadataFailure: ToolState = {
+      status: "completed",
+      input: { anything: true },
+      output: "some failure",
+      title: "tool",
+      metadata: { success: false },
+      time: { start: 0, end: 1 },
+    };
+    expect(getOpenCodeToolFailureSummaryFromState(completedMetadataFailure)).toContain("some failure");
   });
 
   test("findToolPartByCallID finds most recent matching tool part", () => {
@@ -83,26 +101,6 @@ describe("OpenCode failure detection", () => {
     expect(findToolPartByCallID(messages, "missing")).toBe(null);
   });
 
-  test("fallback detector still catches bash exit codes", () => {
-    expect(isOpenCodeToolFailure("bash", "", { exit: 2 })).toBe(true);
-    expect(isOpenCodeToolFailure("bash", "ok", { exit: 0 })).toBe(false);
-  });
-});
-
-describe("formatFailureEntry", () => {
-  test("prefers metadata error/message over output string", () => {
-    const entry = formatFailureEntry(
-      "read",
-      { filePath: "/nope" },
-      "Error: File not found: /nope",
-      { error: "Error: File not found: /nope (from metadata)" },
-    );
-
-    expect(entry.tool_name).toBe("read");
-    expect(entry.tool_input).toEqual({ filePath: "/nope" });
-    expect(entry.error_summary).toContain("from metadata");
-    expect(typeof entry.timestamp).toBe("number");
-  });
 });
 
 describe("formatFailureEntryFromSummary", () => {
