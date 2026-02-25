@@ -1,6 +1,6 @@
 # ADR 0006: Robust Tool Failure Detection Across OpenCode Failure Shapes
 
-- Status: Accepted
+- Status: Superseded by ADR 0008
 - Date: 2026-02-25
 
 ## Context
@@ -27,6 +27,8 @@ Failure conditions include:
 - `metadata.exitCode !== 0` (fallback for API changes)
 - known error string prefixes/patterns on `output` (checked only on the first N characters to reduce false positives)
 - `metadata.success === false` or `metadata.isError === true` (if present)
+
+This ADR is superseded; see ADR 0008 for the current approach.
 
 ## Consequences
 
