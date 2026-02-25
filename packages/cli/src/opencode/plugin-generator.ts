@@ -8,7 +8,7 @@ import { readFileSync } from "fs";
  * installed in `{targetDir}/.opencode`.
  */
 export function generatePluginSource(config: { dataDir: string }): string {
-  const templateUrl = new URL("./opencode-plugin-template.ts", import.meta.url);
+  const templateUrl = new URL("./plugin-template.ts", import.meta.url);
   const template = readFileSync(templateUrl, "utf-8");
 
   const quoted = JSON.stringify(config.dataDir);

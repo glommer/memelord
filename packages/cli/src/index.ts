@@ -50,7 +50,7 @@ function timeAgo(epochSec: number): string {
 }
 
 if (command === "hook") {
-  const { runHook } = await import("./hooks.js");
+  const { runHook } = await import("./claude/hooks.js");
   await runHook(process.argv[3] ?? "");
 
 } else if (!command || command === "serve") {

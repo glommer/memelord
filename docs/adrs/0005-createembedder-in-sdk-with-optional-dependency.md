@@ -15,7 +15,7 @@ However, using `optionalDependencies` adds complexity: the implementation needs 
 - Create `packages/embedder` (package name: `memelord-embedder`) with `@huggingface/transformers` as its sole hard `dependency` and `createEmbedder` as its sole export.
 - Remove `createEmbedder` from the SDK (`memelord`) entirely. The SDK has no knowledge of or dependency on `@huggingface/transformers`.
 - `packages/cli/src/embedder.ts` re-exports from `memelord-embedder` (unchanged public API for CLI internals).
-- The OpenCode plugin template (`opencode-plugin-template.ts`) imports `createEmbedder` from `memelord-embedder` directly.
+- The OpenCode plugin template (`packages/cli/src/opencode/plugin-template.ts`) imports `createEmbedder` from `memelord-embedder` directly.
 - The plugin's generated `.opencode/package.json` lists `memelord-embedder` as a dependency (not `memelord` + transformers separately).
 
 ## Consequences

@@ -39,7 +39,7 @@ Investigate the repository plan in `@docs/plans/OPENCODE_PLUGIN_PLAN.md`, determ
 - Inspect current state:
   - `git status`
   - read `PLAN.md`
-  - quick `ls`/`glob` of planned directories (`packages/cli/src/`, `packages/sdk/src/`, `test/opencode-plugin/`)
+  - quick `ls`/`glob` of planned directories (`packages/cli/src/opencode/`, `packages/cli/src/claude/`, `packages/sdk/src/`, `test/opencode-plugin/`)
   - `grep` for planned function names (e.g. `generatePluginSource`, `isOpenCodeToolFailure`, `extractToolSequencesFromOC`, `detectCorrections`, `buildDiscoverySummary`, `hookEmbedDecay`)
 - Execute one PLAN task end-to-end:
   - add/modify implementation

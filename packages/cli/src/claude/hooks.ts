@@ -384,7 +384,7 @@ async function hookSessionEnd(): Promise<void> {
   if (!existsSync(dbPath)) process.exit(0);
 
   try {
-    const { createEmbedder } = await import("./embedder.js");
+    const { createEmbedder } = await import("../embedder.js");
     const embed = await createEmbedder();
 
     const store = createMemoryStore({

@@ -20,7 +20,7 @@ Template strings typically lose IDE support (type checking, autocomplete, refact
 
 Author the OpenCode plugin as a real TypeScript source file (checked by the TypeScript language service) and generate the installed plugin by replacing a placeholder constant.
 
-- Source of truth: `packages/cli/src/opencode-plugin-template.ts`.
+- Source of truth: `packages/cli/src/opencode/plugin-template.ts`.
 - Placeholder: `const DATA_DIR = "__DATA_DIR__"`.
 - Generation: `generatePluginSource({ dataDir })` reads the template source, replaces the quoted placeholder with the project-specific absolute path, and writes the result to `.opencode/plugins/memelord.ts`.
 

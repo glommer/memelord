@@ -37,7 +37,7 @@ The plugin is a **single generated `.ts` file** placed at `.opencode/plugins/mem
   package.json           # Generated/updated by `memelord init` (depends on memelord)
 ```
 
-The plugin source lives as a **real TypeScript file** at `packages/cli/src/opencode-plugin-template.ts` — not a template string. It uses a `__DATA_DIR__` placeholder constant that `generatePluginSource()` replaces with the actual path at generation time. This gives full IDE support (type checking, autocompletion, refactoring) during development. The `createEmbedder` function is exported from the `memelord` SDK package as an optional capability — `@huggingface/transformers` is an optional dependency, and `createEmbedder` uses a dynamic `import()` with a clear error message if the package isn't installed.
+The plugin source lives as a **real TypeScript file** at `packages/cli/src/opencode/plugin-template.ts` — not a template string. It uses a `__DATA_DIR__` placeholder constant that `generatePluginSource()` replaces with the actual path at generation time. This gives full IDE support (type checking, autocompletion, refactoring) during development. The `createEmbedder` function is exported from the `memelord` SDK package as an optional capability — `@huggingface/transformers` is an optional dependency, and `createEmbedder` uses a dynamic `import()` with a clear error message if the package isn't installed.
 
 ---
 
@@ -115,7 +115,7 @@ The `SessionPromptData` type confirms `noReply?: boolean` is a supported body fi
 
 ### Approach: Real `.ts` file with placeholder replacement
 
-Instead of embedding the entire plugin source inside a template literal string (which would lose all IDE support), the plugin is written as a **real TypeScript file** at `packages/cli/src/opencode-plugin-template.ts`. It uses a placeholder constant:
+Instead of embedding the entire plugin source inside a template literal string (which would lose all IDE support), the plugin is written as a **real TypeScript file** at `packages/cli/src/opencode/plugin-template.ts`. It uses a placeholder constant:
 
 ```ts
 const DATA_DIR = "__DATA_DIR__"
@@ -127,21 +127,21 @@ The `generatePluginSource()` function reads this file's source, replaces `"__DAT
 
 #### 2.1 Create the plugin source file
 
-- [x] Create new file `packages/cli/src/opencode-plugin-template.ts`
+- [x] Create new file `packages/cli/src/opencode/plugin-template.ts`
 - [x] This is a **real TypeScript file** — not a template string generator. It contains the actual plugin source code with a placeholder for `DATA_DIR`.
-- [x] At the bottom of the file (or in a separate file `packages/cli/src/opencode-plugin-generator.ts`), export the generator function:
+- [x] At the bottom of the file (or in a separate file `packages/cli/src/opencode/plugin-generator.ts`), export the generator function:
   ```ts
   export function generatePluginSource(config: { dataDir: string }): string
   ```
   This function:
-  1. Reads the source of `opencode-plugin-template.ts` using `readFileSync(__filename)` (or reads from a known path relative to the package)
+  1. Reads the source of `plugin-template.ts` using `readFileSync(__filename)` (or reads from a known path relative to the package)
   2. Replaces the placeholder `"__DATA_DIR__"` (including quotes) with `"${config.dataDir}"` (the actual path, quoted)
   3. Strips out the `generatePluginSource` function itself and its imports (since the generated file shouldn't contain the generator)
   4. Returns the resulting string
 
-  **Alternative (simpler):** If reading `__filename` at runtime is fragile across build targets, keep the generator in a separate file `packages/cli/src/opencode-plugin-generator.ts` that imports and re-exports the template content. The key constraint is that `opencode-plugin-template.ts` must be valid TypeScript that the IDE can check.
+  **Alternative (simpler):** If reading `__filename` at runtime is fragile across build targets, keep the generator in a separate file `packages/cli/src/opencode/plugin-generator.ts` that imports and re-exports the template content. The key constraint is that `plugin-template.ts` must be valid TypeScript that the IDE can check.
 
-#### 2.2 Define the plugin source structure (in `opencode-plugin-template.ts`)
+#### 2.2 Define the plugin source structure (in `plugin-template.ts`)
 
 The file is real TypeScript with these sections in order:
 
@@ -167,7 +167,7 @@ The file is real TypeScript with these sections in order:
 
 - [x] **Helper: `getSessionsDir()`** — returns `join(DATA_DIR, "sessions")`, creating it with `mkdirSync({ recursive: true })` if it doesn't exist.
 
-- [x] **Helper: `createLightStore(sessionId: string): MemoryStore`** — creates a `MemoryStore` with a dummy embed function (`async () => new Float32Array(384)`), using `getDbPath()` for `dbPath`. This is the same pattern as `packages/cli/src/hooks.ts:40-48`.
+- [x] **Helper: `createLightStore(sessionId: string): MemoryStore`** — creates a `MemoryStore` with a dummy embed function (`async () => new Float32Array(384)`), using `getDbPath()` for `dbPath`. This is the same pattern as `packages/cli/src/claude/hooks.ts:40-48`.
 
 - [x] **Module-level state:**
   ```ts
@@ -204,7 +204,7 @@ The file is real TypeScript with these sections in order:
 
 **Goal:** When a new OpenCode session starts, fetch top memories and inject them as context.
 
-### Behavior to replicate (from `packages/cli/src/hooks.ts:54-112`)
+### Behavior to replicate (from `packages/cli/src/claude/hooks.ts:54-112`)
 
 The CC hook receives `{ session_id, cwd }` on stdin and:
 1. Opens a lightweight store (dummy embedder — no model load) via `createLightStore(cwd, sessionId)`
@@ -212,14 +212,14 @@ The CC hook receives `{ session_id, cwd }` on stdin and:
 3. Writes session metadata to `{sessionsDir}/{sessionId}.json` with fields: `{ session_id, cwd, started_at, injected_memory_ids }`
 4. Builds a context string with two sections:
    - **Memories section** (only if memories exist): header `# Memories from past sessions\n\n` followed by each memory formatted as `[{category}] (id: {id}, weight: {weight.toFixed(2)})\n{content}\n\n`
-   - **Instructions section** (always): the full `# Memory system instructions` block with all 6 numbered items (see `packages/cli/src/hooks.ts:85-99` for exact text)
+   - **Instructions section** (always): the full `# Memory system instructions` block with all 6 numbered items (see `packages/cli/src/claude/hooks.ts:85-99` for exact text)
 5. Outputs JSON to stdout: `{ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } }`
 
 ### Tasks
 
 #### 3.1 Implement the `event` handler for `session.created`
 
-All of this code goes inside the `event` handler in the generated plugin template (in `packages/cli/src/opencode-plugin-template.ts`), guarded by `if (event.type === "session.created")`.
+All of this code goes inside the `event` handler in the generated plugin template (in `packages/cli/src/opencode/plugin-template.ts`), guarded by `if (event.type === "session.created")`.
 
 - [ ] **Guard:** Check `if (event.type !== "session.created") return` at the top (alongside the `session.idle` check — use a switch or if/else chain).
 
@@ -243,9 +243,9 @@ All of this code goes inside the `event` handler in the generated plugin templat
 
 - [ ] **Record session metadata in-memory:** `sessionMeta[sessionID] = { injectedMemoryIds: memories.map(m => m.id), startedAt: Math.floor(Date.now() / 1000) }`
 
-- [ ] **Build context string — memories section:** If `memories.length > 0`, start with `"# Memories from past sessions\n\n"`, then for each memory append `[${mem.category}] (id: ${mem.id}, weight: ${mem.weight.toFixed(2)})\n${mem.content}\n\n`. This must match the CC format exactly (see `packages/cli/src/hooks.ts:77-83`).
+- [ ] **Build context string — memories section:** If `memories.length > 0`, start with `"# Memories from past sessions\n\n"`, then for each memory append `[${mem.category}] (id: ${mem.id}, weight: ${mem.weight.toFixed(2)})\n${mem.content}\n\n`. This must match the CC format exactly (see `packages/cli/src/claude/hooks.ts:77-83`).
 
-- [ ] **Build context string — instructions section:** Append the full `# Memory system instructions` block. Copy the exact text from `packages/cli/src/hooks.ts:85-99`. This is a multi-line string with 6 numbered items covering: `memory_start_task`, `memory_report` (correction), `memory_report` (user_input), `memory_report` (insight), `memory_contradict`, and `memory_end_task`. The text must be identical to the CC version.
+- [ ] **Build context string — instructions section:** Append the full `# Memory system instructions` block. Copy the exact text from `packages/cli/src/claude/hooks.ts:85-99`. This is a multi-line string with 6 numbered items covering: `memory_start_task`, `memory_report` (correction), `memory_report` (user_input), `memory_report` (insight), `memory_contradict`, and `memory_end_task`. The text must be identical to the CC version.
 
 - [ ] **Inject context:** Call:
   ```ts
@@ -267,7 +267,7 @@ All of this code goes inside the `event` handler in the generated plugin templat
 
 To support Phase 8 parity testing, the context-building logic should be a standalone function within the template:
 
-- [ ] Define `function buildSessionStartContext(memories: Array<{ id: string; content: string; category: string; weight: number }>): string` inside the plugin template file `packages/cli/src/opencode-plugin-template.ts` (before the plugin export). Export it so it can be imported by tests (Phase 8).
+- [ ] Define `function buildSessionStartContext(memories: Array<{ id: string; content: string; category: string; weight: number }>): string` inside the plugin template file `packages/cli/src/opencode/plugin-template.ts` (before the plugin export). Export it so it can be imported by tests (Phase 8).
 - [ ] Move the memories-section + instructions-section string building into this function.
 - [ ] Call it from the `session.created` handler: `const context = buildSessionStartContext(memories)`
 
@@ -277,7 +277,7 @@ To support Phase 8 parity testing, the context-building logic should be a standa
 
 **Goal:** After each tool call, detect failures and append them to a JSONL file for later analysis.
 
-### Behavior to replicate (from `packages/cli/src/hooks.ts:118-154`)
+### Behavior to replicate (from `packages/cli/src/claude/hooks.ts:118-154`)
 
 The CC hook receives `{ tool_name, tool_input, tool_response, session_id, cwd }` on stdin and:
 1. Reads `input.tool_response` — fast exits if falsy
@@ -305,7 +305,7 @@ The `output.output` field is always a string. The `output.metadata` field is an 
 
 #### 4.1 Define the `isOpenCodeToolFailure` function
 
-Inside the plugin template file `packages/cli/src/opencode-plugin-template.ts` (before the plugin export), define:
+Inside the plugin template file `packages/cli/src/opencode/plugin-template.ts` (before the plugin export), define:
 
 - [ ] `function isOpenCodeToolFailure(toolName: string, outputStr: string, metadata: any): boolean`
 - [ ] The function checks these conditions (any match returns `true`):
@@ -356,11 +356,11 @@ The `session.idle` event handler is split into two independent concerns:
 
 1. **Transcript analysis (runs inline, every `session.idle`):** Self-correction detection, discovery detection, memory penalization, failure pattern analysis. Mirrors CC's `Stop` hook, which runs fresh every turn with no idempotency guard — accepting the risk of duplicate memories if `session.idle` fires multiple times for the same turn.
 
-2. **Embed + decay + cleanup (runs in a detached process, 5-minute delay):** Spawns `memelord hook embed-decay <sessionId> <dataDir>` as a detached child process. The child process sleeps for 5 minutes, then runs the embed/decay/cleanup work. This survives OpenCode process exit. The CLI command is a new addition to `packages/cli/src/hooks.ts`.
+2. **Embed + decay + cleanup (runs in a detached process, 5-minute delay):** Spawns `memelord hook embed-decay <sessionId> <dataDir>` as a detached child process. The child process sleeps for 5 minutes, then runs the embed/decay/cleanup work. This survives OpenCode process exit. The CLI command is a new addition to `packages/cli/src/claude/hooks.ts`.
 
 ### Behavior to replicate
 
-**From `packages/cli/src/hooks.ts:246-370` (Stop):**
+**From `packages/cli/src/claude/hooks.ts:246-370` (Stop):**
 1. Parse transcript from JSONL file at `transcript_path` — each line is `{ message: { role, content, usage } }` or `{ role, content, usage }` directly
 2. Extract tool sequences by iterating over messages and finding `tool_use` / `tool_result` content blocks
 3. Detect self-corrections: a failed tool call followed by the same tool succeeding with different input within a 3-step lookahead window
@@ -369,7 +369,7 @@ The `session.idle` event handler is split into two independent concerns:
 6. Analyze failure patterns: read `{sessionId}.failures.jsonl`, group by `tool_name`, store a correction memory for any tool with >= 3 failures
 7. Store corrections via `store.insertRawMemory(content, "correction", 1.5)` and discoveries via `store.insertRawMemory(content, "discovery", 1.0)`
 
-**From `packages/cli/src/hooks.ts:376-414` (SessionEnd):**
+**From `packages/cli/src/claude/hooks.ts:376-414` (SessionEnd):**
 1. Load real embedding model via `createEmbedder()` from `packages/cli/src/embedder.ts`
 2. Create a full store (with real embedder): `createMemoryStore({ dbPath, sessionId, embed })`
 3. Call `store.init()` to ensure tables exist
@@ -400,7 +400,7 @@ The `session.idle` event handler is split into two independent concerns:
 
 #### 5.1 Define `extractToolSequencesFromOC` function
 
-Inside the plugin template file `packages/cli/src/opencode-plugin-template.ts`, define:
+Inside the plugin template file `packages/cli/src/opencode/plugin-template.ts`, define:
 
 - [ ] `function extractToolSequencesFromOC(messages: Array<{ info: any; parts: any[] }>): Array<{ tool: string; input: any; failed: boolean }>`
 - [ ] Iterate over each message in `messages`
@@ -420,7 +420,7 @@ Inside the plugin template file `packages/cli/src/opencode-plugin-template.ts`, 
 
 #### 5.2 Define `detectCorrections` function
 
-This is the same pure algorithm as CC (`packages/cli/src/hooks.ts:159-198`):
+This is the same pure algorithm as CC (`packages/cli/src/claude/hooks.ts:159-198`):
 
 - [ ] `function detectCorrections(sequence: Array<{ tool: string; input: any; failed: boolean }>): Array<{ failedTool: string; failedInput: string; succeededTool: string; succeededInput: string }>`
 - [ ] For each entry `i` in the sequence where `sequence[i].failed === true`:
@@ -459,7 +459,7 @@ This is the same pure algorithm as CC (`packages/cli/src/hooks.ts:159-198`):
 
 #### 5.6 Define `buildDiscoverySummary` function
 
-Same pure algorithm as CC (`packages/cli/src/hooks.ts:295-308`):
+Same pure algorithm as CC (`packages/cli/src/claude/hooks.ts:295-308`):
 
 - [ ] `function buildDiscoverySummary(texts: string[]): string | null`
 - [ ] If `texts.length === 0`, return `null`
@@ -544,7 +544,7 @@ Inside the `event` handler, add the `session.idle` branch. This runs inline in t
       }
       ```
     - [ ] If `injectedIds.length > 0`, for each `id`:
-      - [ ] `await store.penalizeMemory(id, 0.999)` — factor 0.999 (same as CC `packages/cli/src/hooks.ts:331`)
+      - [ ] `await store.penalizeMemory(id, 0.999)` — factor 0.999 (same as CC `packages/cli/src/claude/hooks.ts:331`)
     - [ ] Log: `console.error(\`memelord: penalized ${injectedIds.length} injected memories (session used ${Math.round(totalTokens / 1000)}k tokens)\`)`
 
 - [ ] **--- Section D: Failure pattern analysis ---**
@@ -628,9 +628,9 @@ After Section F (closing the light store), still inside the `session.idle` handl
 
 #### 5.10 Add `embed-decay` subcommand to CLI
 
-Add a new hook event handler in `packages/cli/src/hooks.ts` and register it in the dispatcher.
+Add a new hook event handler in `packages/cli/src/claude/hooks.ts` and register it in the dispatcher.
 
-- [ ] **Define `hookEmbedDecay(sessionId: string, dataDir: string)` function** in `packages/cli/src/hooks.ts`:
+- [ ] **Define `hookEmbedDecay(sessionId: string, dataDir: string)` function** in `packages/cli/src/claude/hooks.ts`:
 
   ```ts
   async function hookEmbedDecay(sessionId: string, dataDir: string): Promise<void> {
@@ -642,7 +642,7 @@ Add a new hook event handler in `packages/cli/src/hooks.ts` and register it in t
     if (!existsSync(dbPath)) process.exit(0)
 
     try {
-      const { createEmbedder } = await import("./embedder.js")
+      const { createEmbedder } = await import("../embedder.js")
       const embed = await createEmbedder()
 
       const store = createMemoryStore({
@@ -675,10 +675,10 @@ Add a new hook event handler in `packages/cli/src/hooks.ts` and register it in t
   Key design points:
   - Takes `sessionId` and `dataDir` as positional CLI args (not from stdin — this runs detached, not piped)
   - Sleeps first via `setTimeout` — the delay is configurable via `MEMELORD_EMBED_DELAY_MS` env var (defaults to 300000 = 5 minutes) for testing
-  - Identical embed/decay/cleanup logic as `hookSessionEnd()` in `packages/cli/src/hooks.ts:376-414`
+  - Identical embed/decay/cleanup logic as `hookSessionEnd()` in `packages/cli/src/claude/hooks.ts:376-414`
   - Session file cleanup happens here (not in the plugin's session.idle handler) because embed-decay is the final step
 
-- [ ] **Update `runHook()` dispatcher** in `packages/cli/src/hooks.ts:420-429`:
+- [ ] **Update `runHook()` dispatcher** in `packages/cli/src/claude/hooks.ts:420-429`:
   ```ts
   case "embed-decay": {
     const sessionId = process.argv[4]  // memelord hook embed-decay <sessionId> <dataDir>
@@ -700,7 +700,7 @@ Add a new hook event handler in `packages/cli/src/hooks.ts` and register it in t
 - [x] **Create `packages/embedder`** with `@huggingface/transformers` as its sole hard `dependency` and `createEmbedder` as its sole export (`packages/embedder/src/index.ts`).
 - [x] **The SDK (`memelord`) has no embedder** — `packages/sdk/src/embedder.ts` does not exist; `createEmbedder` is not exported from `packages/sdk/src/index.ts`; `packages/sdk/package.json` has no `@huggingface/transformers` dep.
 - [x] **Update CLI embedder to re-export from `memelord-embedder`:** `packages/cli/src/embedder.ts` contains `export { createEmbedder } from "memelord-embedder"`. `packages/cli/package.json` depends on `memelord-embedder: workspace:*` and no longer lists `@huggingface/transformers` directly.
-- [x] **The OpenCode plugin template imports from `memelord-embedder` directly:** Line 3 of `opencode-plugin-template.ts` is `import { createEmbedder } from "memelord-embedder"`.
+- [x] **The OpenCode plugin template imports from `memelord-embedder` directly:** Line 3 of `packages/cli/src/opencode/plugin-template.ts` is `import { createEmbedder } from "memelord-embedder"`.
 - [x] **`tsconfig.build.json` unchanged** — it only covers `packages/sdk/src/**/*.ts`, which is correct; `packages/embedder` is not compiled by the SDK build.
 
 ---
@@ -715,7 +715,7 @@ The init command is in `packages/cli/src/index.ts:260-396`. The OpenCode MCP con
 
 #### 6.1 Add import for the template generator
 
-- [ ] At the top of `packages/cli/src/index.ts`, add: `import { generatePluginSource } from "./opencode-plugin-generator.js"` (or `"./opencode-plugin-template.js"` depending on where the generator function lives — see Phase 2.1)
+- [ ] At the top of `packages/cli/src/index.ts`, add: `import { generatePluginSource } from "./opencode/plugin-generator.js"` (or `"./opencode/plugin-template.js"` depending on where the generator function lives — see Phase 2.1)
   - Note: use `.js` extension (not `.ts`) because this is the Node-compatible import path used after compilation.
 
 #### 6.2 Add OpenCode plugin generation step to `memelord init`
@@ -889,21 +889,21 @@ The pure-logic functions defined in Phases 3-5 (`buildSessionStartContext`, `det
 
 #### 8.1 Ensure plugin template functions are importable for testing
 
-Since the plugin template is now a **real TypeScript file** (not a template string), its pure functions are directly importable for testing. No separate `opencode-plugin-functions.ts` extraction is needed — the functions live in `packages/cli/src/opencode-plugin-template.ts` and can be imported directly.
+Since the plugin template is now a **real TypeScript file** (not a template string), its pure functions are directly importable for testing. No separate `plugin-functions.ts` extraction is needed — the functions live in `packages/cli/src/opencode/plugin-template.ts` and can be imported directly.
 
-- [ ] Verify that the pure functions in `packages/cli/src/opencode-plugin-template.ts` are exported (or can be imported) for testing:
+- [ ] Verify that the pure functions in `packages/cli/src/opencode/plugin-template.ts` are exported (or can be imported) for testing:
   - [ ] `buildSessionStartContext`
   - [ ] `detectCorrections`
   - [ ] `buildDiscoverySummary`
   - [ ] `analyzeFailurePatterns`
-- [ ] If the functions are not exported from the plugin template (because the generated file shouldn't have extra exports), create a thin re-export file `packages/cli/src/opencode-plugin-functions.ts` that imports and re-exports them:
+- [ ] If the functions are not exported from the plugin template (because the generated file shouldn't have extra exports), create a thin re-export file `packages/cli/src/opencode/plugin-functions.ts` that imports and re-exports them:
   ```ts
   export {
     buildSessionStartContext,
     detectCorrections,
     buildDiscoverySummary,
     analyzeFailurePatterns,
-  } from "./opencode-plugin-template.js"
+  } from "./plugin-template.js"
   ```
   This keeps the source of truth in one place (the template file) while providing a clean import path for tests. Since the template is real TypeScript, these are the actual implementations — not copies.
 - [ ] **Note:** The `__DATA_DIR__` placeholder in the template file won't affect testability of pure functions since none of them reference `DATA_DIR`.
@@ -916,7 +916,7 @@ Since the plugin template is now a **real TypeScript file** (not a template stri
 - [ ] Test: multiple memories are listed in order with correct formatting
 - [ ] Test: weight formatting uses exactly 2 decimal places (`toFixed(2)`)
 - [ ] Test: instructions section contains all 6 numbered items (`memory_start_task`, `memory_report` x3, `memory_contradict`, `memory_end_task`)
-- [ ] Test: output matches the CC version by feeding the same mock memories to both `buildSessionStartContext` (from OC functions) and manually comparing to the CC `hookSessionStart` output string construction (from `packages/cli/src/hooks.ts:77-99`)
+- [ ] Test: output matches the CC version by feeding the same mock memories to both `buildSessionStartContext` (from OC functions) and manually comparing to the CC `hookSessionStart` output string construction (from `packages/cli/src/claude/hooks.ts:77-99`)
 
 #### 8.3 Write correction detector tests
 
