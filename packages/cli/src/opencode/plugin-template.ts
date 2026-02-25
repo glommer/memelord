@@ -84,14 +84,15 @@ export function findToolPartByCallID(
   messages: Array<{ info: unknown; parts: Part[] }>,
   callID: string,
 ): ToolPart | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const parts = messages[i]?.parts ?? [];
-    for (let j = parts.length - 1; j >= 0; j--) {
-      const part = parts[j];
-      if (part.type === "tool" && part.callID === callID) return part;
+  let found: ToolPart | null = null;
+
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type === "tool" && part.callID === callID) found = part;
     }
   }
-  return null;
+
+  return found;
 }
 
 export function formatFailureEntryFromSummary(
