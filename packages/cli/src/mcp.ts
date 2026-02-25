@@ -6,6 +6,7 @@ import { createEmbedder } from "./embedder.js";
 import { resolve } from "path";
 import { existsSync, mkdirSync } from "fs";
 import { randomUUID } from "crypto";
+import { memoryReportSchema, memoryEndTaskSchema } from "./schemas.js";
 
 function getDataDir(): string {
   const dir = resolve(process.env.MEMELORD_DIR ?? ".memelord");
@@ -98,15 +99,7 @@ Use type "insight" when you discover something useful about the codebase during 
 - Build/test conventions ("run 'make check' before committing, tests are in tests/")
 - Important relationships between components
 Store insights proactively — they save future sessions from re-exploring the same codebase.`,
-    {
-      type: z.enum(["correction", "user_input", "insight"]).describe("What kind of memory: correction (self-correction), user_input (user-provided knowledge), or insight (codebase knowledge discovered during exploration)"),
-      lesson: z.string().describe("The lesson learned — what the agent should remember"),
-      what_failed: z.string().optional().describe("(correction only) The approach that failed"),
-      what_worked: z.string().optional().describe("(correction only) The approach that worked"),
-      tokens_wasted: z.number().optional().describe("(correction only) Approximate tokens spent on the wrong approach"),
-      tools_wasted: z.number().optional().describe("(correction only) Number of tool calls wasted"),
-      source: z.enum(["user_denial", "user_correction", "user_input"]).optional().describe("(user_input only) How the user provided this"),
-    },
+    memoryReportSchema.shape,
     async ({ type, lesson, what_failed, what_worked, tokens_wasted, tools_wasted, source }) => {
       try {
         let id: string;
@@ -142,18 +135,7 @@ For self_report: rate each memory that was retrieved at task start:
   1 = glanced at but didn't use
   2 = somewhat useful
   3 = directly applied / saved significant effort`,
-    {
-      task_id: z.string().describe("The task_id returned by memory_start_task"),
-      tokens_used: z.number().describe("Total tokens used during this task"),
-      tool_calls: z.number().describe("Total tool calls made during this task"),
-      errors: z.number().describe("Number of errors encountered (failed commands, test failures, etc.)"),
-      user_corrections: z.number().describe("Number of times the user corrected you or denied a tool call"),
-      completed: z.boolean().describe("Whether the task was completed successfully"),
-      self_report: z.array(z.object({
-        memory_id: z.string(),
-        score: z.number().min(0).max(3),
-      })).optional().describe("Rate each retrieved memory: 0=ignored, 1=glanced, 2=useful, 3=directly applied"),
-    },
+    memoryEndTaskSchema.shape,
     async ({ task_id, tokens_used, tool_calls, errors, user_corrections, completed, self_report }) => {
       try {
         await store.endTask(task_id, {
