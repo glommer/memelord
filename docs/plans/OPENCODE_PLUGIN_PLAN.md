@@ -385,21 +385,21 @@ The `session.idle` event handler is split into two independent concerns:
 
 Inside the plugin template file `packages/cli/src/opencode/plugin-template.ts`, define:
 
-- [ ] `function extractToolSequencesFromOC(messages: Array<{ info: any; parts: any[] }>): Array<{ tool: string; input: any; failed: boolean }>`
-- [ ] Iterate over each message in `messages`
-- [ ] For each message, iterate over `message.parts`
-- [ ] For each part where `part.type === "tool"`:
-  - [ ] Extract `tool` from `part.tool` (this is the tool name string, e.g. `"bash"`, `"read"`, `"edit"`)
-  - [ ] Extract `input` from `part.state.input` (this is an object with the tool's arguments)
-  - [ ] Determine `failed` based on Phase 1 findings — two patterns:
+- [x] `function extractToolSequencesFromOC(messages: Array<{ info: any; parts: any[] }>): Array<{ tool: string; input: any; failed: boolean }>`
+- [x] Iterate over each message in `messages`
+- [x] For each message, iterate over `message.parts`
+- [x] For each part where `part.type === "tool"`:
+   - [x] Extract `tool` from `part.tool` (this is the tool name string, e.g. `"bash"`, `"read"`, `"edit"`)
+   - [x] Extract `input` from `part.state.input` (this is an object with the tool's arguments)
+   - [x] Determine `failed` based on Phase 1 findings — two patterns:
     - If `part.state.status === "error"`: `failed = true` (Pattern A — read, webfetch, etc.)
     - If `part.state.status === "completed"`:
       - Check `part.state.metadata?.exit` for non-zero exit code (Pattern B — bash). Also check `part.state.metadata?.exitCode` for resilience.
       - Check `part.state.output` string (first 200 chars) for error patterns: starts with `"Error:"` or `"error:"`, contains `"ENOENT"`, `"command not found"`, `"No such file"`, `"Permission denied"`.
       - If any check matches: `failed = true`
     - Otherwise (`"pending"` or `"running"`): skip this part (tool hasn't finished)
-  - [ ] Push `{ tool, input, failed }` to the sequence array
-- [ ] Return the sequence array
+   - [x] Push `{ tool, input, failed }` to the sequence array
+- [x] Return the sequence array
 
 #### 5.2 Define `detectCorrections` function
 
@@ -416,29 +416,29 @@ This is the same pure algorithm as CC (`packages/cli/src/claude/hooks.ts:159-198
 
 #### 5.3 Define `sumTokensFromOC` function
 
-- [ ] `function sumTokensFromOC(messages: Array<{ info: any; parts: any[] }>): number`
-- [ ] For each message, check if `message.info.role === "assistant"` (only assistant messages have token counts)
-- [ ] If yes, access `message.info.tokens` which has shape `{ input: number, output: number, reasoning: number, cache: { read: number, write: number } }`
-- [ ] Sum: `tokens.input + tokens.output + tokens.cache.write` — **do NOT include `tokens.cache.read`** (same rationale as CC: it grows quadratically)
-- [ ] Also **do NOT include `tokens.reasoning`** — this matches CC behavior which doesn't count reasoning tokens
-- [ ] Return the total
+- [x] `function sumTokensFromOC(messages: Array<{ info: any; parts: any[] }>): number`
+- [x] For each message, check if `message.info.role === "assistant"` (only assistant messages have token counts)
+- [x] If yes, access `message.info.tokens` which has shape `{ input: number, output: number, reasoning: number, cache: { read: number, write: number } }`
+- [x] Sum: `tokens.input + tokens.output + tokens.cache.write` — **do NOT include `tokens.cache.read`** (same rationale as CC: it grows quadratically)
+- [x] Also **do NOT include `tokens.reasoning`** — this matches CC behavior which doesn't count reasoning tokens
+- [x] Return the total
 
 #### 5.4 Define `countExplorationToolsOC` function
 
-- [ ] `function countExplorationToolsOC(sequence: Array<{ tool: string }>): { reads: number; searches: number; edits: number }`
-- [ ] Map OC tool names to categories:
+- [x] `function countExplorationToolsOC(sequence: Array<{ tool: string }>): { reads: number; searches: number; edits: number }`
+- [x] Map OC tool names to categories:
   - `reads`: `tool === "read"` (OC lowercase)
   - `searches`: `tool === "grep" || tool === "glob"`
   - `edits`: `tool === "edit" || tool === "write" || tool === "patch"` (OC has a `patch` tool too)
-- [ ] Return `{ reads, searches, edits }`
+- [x] Return `{ reads, searches, edits }`
 
 #### 5.5 Define `extractTextBlocksFromOC` function
 
-- [ ] `function extractTextBlocksFromOC(messages: Array<{ info: any; parts: any[] }>): string[]`
-- [ ] For each message where `message.info.role === "assistant"`:
-  - [ ] For each part where `part.type === "text"`:
-    - [ ] If `part.text.length > 80`: push `part.text` to the results array
-- [ ] Return the array of text strings
+- [x] `function extractTextBlocksFromOC(messages: Array<{ info: any; parts: any[] }>): string[]`
+- [x] For each message where `message.info.role === "assistant"`:
+  - [x] For each part where `part.type === "text"`:
+    - [x] If `part.text.length > 80`: push `part.text` to the results array
+- [x] Return the array of text strings
 
 #### 5.6 Define `buildDiscoverySummary` function
 
@@ -469,51 +469,51 @@ Same pure algorithm as CC (`packages/cli/src/claude/hooks.ts:295-308`):
 
 Inside the `event` handler, add the `session.idle` branch. This runs inline in the plugin process on every `session.idle` event (no idempotency guard — mirrors CC behavior).
 
-- [ ] **Guard check:** `if (event.type !== "session.idle") return` (alongside the `session.created` check)
+- [x] **Guard check:** `if (event.type !== "session.idle") return` (alongside the `session.created` check)
 
-- [ ] **Extract sessionID:** `const sessionID = (event.properties as any).sessionID` — confirmed from `EventSessionIdle` type in Phase 1.
+- [x] **Extract sessionID:** `const sessionID = (event.properties as any).sessionID` — confirmed from `EventSessionIdle` type in Phase 1.
 
-- [ ] **Early exit if no DB:** `if (!existsSync(getDbPath())) return`
+- [x] **Early exit if no DB:** `if (!existsSync(getDbPath())) return`
 
-- [ ] **Wrap everything below in try/catch** — on error: `console.error(\`memelord session.idle error: ${e.message}\`)`
+- [x] **Wrap everything below in try/catch** — on error: `console.error(\`memelord session.idle error: ${e.message}\`)`
 
-- [ ] **Fetch messages from SDK:**
+- [x] **Fetch messages from SDK:**
   ```ts
   const response = await client.session.messages({ path: { id: sessionID } })
   const messages = response.data ?? []
   ```
   Note: `response.data` is `Array<{ info: Message, parts: Part[] }>`. If the SDK returns an error, `response.data` may be undefined — guard with `?? []`.
 
-- [ ] **Skip if no messages:** `if (messages.length === 0) return`
+- [x] **Skip if no messages:** `if (messages.length === 0) return`
 
-- [ ] **Create light store:** `const store = createLightStore(sessionID)`
+- [x] **Create light store:** `const store = createLightStore(sessionID)`
 
-- [ ] **--- Section A: Self-correction detection ---**
-  - [ ] `const sequence = extractToolSequencesFromOC(messages)`
-  - [ ] `const corrections = detectCorrections(sequence)`
-  - [ ] `let correctionsFound = 0`
-  - [ ] For each correction `c`:
-    - [ ] Build content: `` `Auto-detected correction with ${c.failedTool}:\n\nFailed approach: ${c.failedInput}\nWorking approach: ${c.succeededInput}` ``
-    - [ ] `await store.insertRawMemory(content, "correction", 1.5)` — weight 1.5 (same as CC)
-    - [ ] `correctionsFound++`
+- [x] **--- Section A: Self-correction detection ---**
+  - [x] `const sequence = extractToolSequencesFromOC(messages)`
+  - [x] `const corrections = detectCorrections(sequence)`
+  - [x] `let correctionsFound = 0`
+  - [x] For each correction `c`:
+    - [x] Build content: `` `Auto-detected correction with ${c.failedTool}:\n\nFailed approach: ${c.failedInput}\nWorking approach: ${c.succeededInput}` ``
+    - [x] `await store.insertRawMemory(content, "correction", 1.5)` — weight 1.5 (same as CC)
+    - [x] `correctionsFound++`
 
-- [ ] **--- Section B: Discovery detection ---**
-  - [ ] `const totalTokens = sumTokensFromOC(messages)`
-  - [ ] `let discoveryStored = false`
-  - [ ] If `totalTokens >= DISCOVERY_TOKEN_THRESHOLD`:
-    - [ ] `const exploration = countExplorationToolsOC(sequence)`
-    - [ ] `const explorationRatio = (exploration.reads + exploration.searches) / Math.max(exploration.reads + exploration.searches + exploration.edits, 1)`
-    - [ ] If `explorationRatio > 0.5`:
-      - [ ] `const texts = extractTextBlocksFromOC(messages)`
-      - [ ] `const summary = buildDiscoverySummary(texts)`
-      - [ ] If `summary` is not null:
-        - [ ] Build content: `` `[Discovery after ${Math.round(totalTokens / 1000)}k tokens, ${sequence.length} tool calls]\n\n${summary}` ``
-        - [ ] `await store.insertRawMemory(content, "discovery", 1.0)` — weight 1.0
-        - [ ] `discoveryStored = true`
+- [x] **--- Section B: Discovery detection ---**
+  - [x] `const totalTokens = sumTokensFromOC(messages)`
+  - [x] `let discoveryStored = false`
+  - [x] If `totalTokens >= DISCOVERY_TOKEN_THRESHOLD`:
+    - [x] `const exploration = countExplorationToolsOC(sequence)`
+    - [x] `const explorationRatio = (exploration.reads + exploration.searches) / Math.max(exploration.reads + exploration.searches + exploration.edits, 1)`
+    - [x] If `explorationRatio > 0.5`:
+      - [x] `const texts = extractTextBlocksFromOC(messages)`
+      - [x] `const summary = buildDiscoverySummary(texts)`
+      - [x] If `summary` is not null:
+        - [x] Build content: `` `[Discovery after ${Math.round(totalTokens / 1000)}k tokens, ${sequence.length} tool calls]\n\n${summary}` ``
+        - [x] `await store.insertRawMemory(content, "discovery", 1.0)` — weight 1.0
+        - [x] `discoveryStored = true`
 
-- [ ] **--- Section C: Penalize injected memories ---**
-  - [ ] If `totalTokens >= PENALIZE_TOKEN_THRESHOLD`:
-    - [ ] First check in-memory `sessionMeta[sessionID]`. If not available, fall back to reading from disk:
+- [x] **--- Section C: Penalize injected memories ---**
+  - [x] If `totalTokens >= PENALIZE_TOKEN_THRESHOLD`:
+    - [x] First check in-memory `sessionMeta[sessionID]`. If not available, fall back to reading from disk:
       ```ts
       let injectedIds: string[] = sessionMeta[sessionID]?.injectedMemoryIds ?? []
       if (injectedIds.length === 0) {
@@ -526,31 +526,31 @@ Inside the `event` handler, add the `session.idle` branch. This runs inline in t
         }
       }
       ```
-    - [ ] If `injectedIds.length > 0`, for each `id`:
-      - [ ] `await store.penalizeMemory(id, 0.999)` — factor 0.999 (same as CC `packages/cli/src/claude/hooks.ts:331`)
-    - [ ] Log: `console.error(\`memelord: penalized ${injectedIds.length} injected memories (session used ${Math.round(totalTokens / 1000)}k tokens)\`)`
+    - [x] If `injectedIds.length > 0`, for each `id`:
+      - [x] `await store.penalizeMemory(id, 0.999)` — factor 0.999 (same as CC `packages/cli/src/claude/hooks.ts:331`)
+    - [x] Log: `console.error(\`memelord: penalized ${injectedIds.length} injected memories (session used ${Math.round(totalTokens / 1000)}k tokens)\`)`
 
-- [ ] **--- Section D: Failure pattern analysis ---**
-  - [ ] `const failuresFile = join(getSessionsDir(), \`${sessionID}.failures.jsonl\`)`
-  - [ ] If `existsSync(failuresFile)`:
-    - [ ] `const failuresJsonl = readFileSync(failuresFile, "utf-8")`
-    - [ ] `const failureMemories = analyzeFailurePatterns(failuresJsonl)`
-    - [ ] For each `fm` in `failureMemories`:
-      - [ ] `await store.insertRawMemory(fm.content, fm.category, fm.weight)`
-      - [ ] `correctionsFound++`
+- [x] **--- Section D: Failure pattern analysis ---**
+  - [x] `const failuresFile = join(getSessionsDir(), \`${sessionID}.failures.jsonl\`)`
+  - [x] If `existsSync(failuresFile)`:
+    - [x] `const failuresJsonl = readFileSync(failuresFile, "utf-8")`
+    - [x] `const failureMemories = analyzeFailurePatterns(failuresJsonl)`
+    - [x] For each `fm` in `failureMemories`:
+      - [x] `await store.insertRawMemory(fm.content, fm.category, fm.weight)`
+      - [x] `correctionsFound++`
 
-- [ ] **--- Section E: Log results ---**
-  - [ ] If `correctionsFound > 0`: `console.error(\`memelord: stored ${correctionsFound} auto-detected corrections\`)`
-  - [ ] If `discoveryStored`: `console.error("memelord: stored 1 discovery from high-token exploration")`
+- [x] **--- Section E: Log results ---**
+  - [x] If `correctionsFound > 0`: `console.error(\`memelord: stored ${correctionsFound} auto-detected corrections\`)`
+  - [x] If `discoveryStored`: `console.error("memelord: stored 1 discovery from high-token exploration")`
 
-- [ ] **--- Section F: Close the light store ---**
-  - [ ] `await store.close()`
+- [x] **--- Section F: Close the light store ---**
+  - [x] `await store.close()`
 
 #### 5.9 Implement the `session.idle` event handler — spawn detached embed-decay process
 
 After Section F (closing the light store), still inside the `session.idle` handler's try block:
 
-- [ ] **Kill previous embed-decay process (if any):** Before spawning a new embed-decay process, kill the previously spawned one to avoid multiple processes waking up simultaneously and competing for SQLite locks:
+- [x] **Kill previous embed-decay process (if any):** Before spawning a new embed-decay process, kill the previously spawned one to avoid multiple processes waking up simultaneously and competing for SQLite locks:
   ```ts
   if (lastEmbedDecayPid !== null) {
     try {
@@ -563,7 +563,7 @@ After Section F (closing the light store), still inside the `session.idle` handl
   ```
   The `lastEmbedDecayPid` variable is defined in module-level state (Phase 2.2). `process.kill()` sends `SIGTERM` by default. If the process has already exited, it throws `ESRCH` which we silently catch. This ensures only the most recent embed-decay process runs — earlier ones are cancelled before they wake up from their 5-minute sleep.
 
-- [ ] **Spawn detached embed-decay process:**
+- [x] **Spawn detached embed-decay process:**
   ```ts
   const memelordBin = process.env.MEMELORD_BIN ?? "memelord"
   const child = spawn(memelordBin, ["hook", "embed-decay", sessionID, DATA_DIR], {
@@ -590,7 +590,7 @@ After Section F (closing the light store), still inside the `session.idle` handl
   5. Clean up session files
   6. Exit
 
-- [ ] **Error handling for spawn:** Wrap the spawn call in its own try/catch. If spawning fails (e.g. `memelord` not in PATH), fall back to resolving the binary path:
+- [x] **Error handling for spawn:** Wrap the spawn call in its own try/catch. If spawning fails (e.g. `memelord` not in PATH), fall back to resolving the binary path:
   ```ts
   try {
     // primary: use `memelord` from PATH
@@ -613,7 +613,7 @@ After Section F (closing the light store), still inside the `session.idle` handl
 
 Add a new hook event handler in `packages/cli/src/claude/hooks.ts` and register it in the dispatcher.
 
-- [ ] **Define `hookEmbedDecay(sessionId: string, dataDir: string)` function** in `packages/cli/src/claude/hooks.ts`:
+- [x] **Define `hookEmbedDecay(sessionId: string, dataDir: string)` function** in `packages/cli/src/claude/hooks.ts`:
 
   ```ts
   async function hookEmbedDecay(sessionId: string, dataDir: string): Promise<void> {
@@ -661,7 +661,7 @@ Add a new hook event handler in `packages/cli/src/claude/hooks.ts` and register 
   - Identical embed/decay/cleanup logic as `hookSessionEnd()` in `packages/cli/src/claude/hooks.ts:376-414`
   - Session file cleanup happens here (not in the plugin's session.idle handler) because embed-decay is the final step
 
-- [ ] **Update `runHook()` dispatcher** in `packages/cli/src/claude/hooks.ts:420-429`:
+- [x] **Update `runHook()` dispatcher** in `packages/cli/src/claude/hooks.ts:420-429`:
   ```ts
   case "embed-decay": {
     const sessionId = process.argv[4]  // memelord hook embed-decay <sessionId> <dataDir>

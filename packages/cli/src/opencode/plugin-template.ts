@@ -142,12 +142,114 @@ You have a persistent memory system available via MCP tools. Use it:
 
 export type ToolSequenceEntry = { tool: string; input: any; failed: boolean };
 
+function isOutputErrorString(output: unknown): boolean {
+  if (typeof output !== "string") return false;
+  const out = output.slice(0, 200);
+  return (
+    out.startsWith("Error:") ||
+    out.startsWith("error:") ||
+    out.includes("ENOENT") ||
+    out.includes("command not found") ||
+    out.includes("No such file") ||
+    out.includes("Permission denied")
+  );
+}
+
+export function extractToolSequencesFromOC(
+  messages: Array<{ info: unknown; parts: Part[] }>,
+): ToolSequenceEntry[] {
+  const sequence: ToolSequenceEntry[] = [];
+
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type !== "tool") continue;
+
+      const tool = part.tool;
+      const state = part.state;
+
+      if (state.status === "pending" || state.status === "running") continue;
+
+      let failed = false;
+      if (state.status === "error") {
+        failed = true;
+      } else {
+        const exit = getExitCodeFromMetadata(state.metadata);
+        if (typeof exit === "number" && exit !== 0) failed = true;
+        if (!failed && isOutputErrorString(state.output)) failed = true;
+        if (!failed && isRecord(state.metadata)) {
+          if (state.metadata.success === false) failed = true;
+          if (state.metadata.isError === true) failed = true;
+        }
+      }
+
+      sequence.push({ tool, input: state.input, failed });
+    }
+  }
+
+  return sequence;
+}
+
 export type Correction = {
   failedTool: string;
   failedInput: string;
   succeededTool: string;
   succeededInput: string;
 };
+
+export function sumTokensFromOC(messages: Array<{ info: any; parts: any[] }>): number {
+  let total = 0;
+  for (const message of messages) {
+    const info = message?.info;
+    if (!isRecord(info)) continue;
+    if (info.role !== "assistant") continue;
+
+    const tokens = info.tokens;
+    if (!isRecord(tokens)) continue;
+
+    const input = typeof tokens.input === "number" ? tokens.input : 0;
+    const output = typeof tokens.output === "number" ? tokens.output : 0;
+    const cache = isRecord(tokens.cache) ? tokens.cache : null;
+    const cacheWrite = cache && typeof cache.write === "number" ? cache.write : 0;
+
+    total += input + output + cacheWrite;
+  }
+  return total;
+}
+
+export function countExplorationToolsOC(sequence: Array<{ tool: string }>): {
+  reads: number;
+  searches: number;
+  edits: number;
+} {
+  let reads = 0;
+  let searches = 0;
+  let edits = 0;
+
+  for (const s of sequence) {
+    if (s.tool === "read") reads++;
+    else if (s.tool === "grep" || s.tool === "glob") searches++;
+    else if (s.tool === "edit" || s.tool === "write" || s.tool === "patch") edits++;
+  }
+
+  return { reads, searches, edits };
+}
+
+export function extractTextBlocksFromOC(messages: Array<{ info: any; parts: any[] }>): string[] {
+  const texts: string[] = [];
+  for (const message of messages) {
+    const info = message?.info;
+    if (!isRecord(info)) continue;
+    if (info.role !== "assistant") continue;
+
+    for (const part of message.parts ?? []) {
+      if (part?.type !== "text") continue;
+      if (typeof part.text !== "string") continue;
+      if (part.text.length <= 80) continue;
+      texts.push(part.text);
+    }
+  }
+  return texts;
+}
 
 export function detectCorrections(sequence: ToolSequenceEntry[]): Correction[] {
   const corrections: Correction[] = [];
@@ -304,16 +406,150 @@ export const MemelordPlugin: Plugin = async ({ client, directory, worktree }: Pl
           return;
         }
         case "session.idle": {
-          // TODO(phase 5): transcript analysis + embed/decay
-          void sessionMeta;
-          void lastEmbedDecayPid;
-          void createEmbedder;
-          void DISCOVERY_TOKEN_THRESHOLD;
-          void PENALIZE_TOKEN_THRESHOLD;
-          void EMBED_DECAY_DELAY_MS;
-          void readFileSync;
-          void unlinkSync;
-          void spawn;
+          const sessionID = (event.properties as any)?.sessionID;
+          if (typeof sessionID !== "string" || sessionID.length === 0) return;
+          if (!existsSync(getDbPath())) return;
+
+          try {
+            const resp = await client.session.messages({
+              path: { id: sessionID },
+              query: { limit: 500 },
+            });
+            const messages = resp.data ?? [];
+            if (messages.length === 0) return;
+
+            const store = createLightStore(sessionID);
+            try {
+              const sequence = extractToolSequencesFromOC(messages);
+
+              // --- Section A: Self-correction detection ---
+              const corrections = detectCorrections(sequence);
+              let correctionsFound = 0;
+              for (const c of corrections) {
+                const content = `Auto-detected correction with ${c.failedTool}:\n\nFailed approach: ${c.failedInput}\nWorking approach: ${c.succeededInput}`;
+                await store.insertRawMemory(content, "correction", 1.5);
+                correctionsFound++;
+              }
+
+              // --- Section B: Discovery detection ---
+              const totalTokens = sumTokensFromOC(messages);
+              let discoveryStored = false;
+              if (totalTokens >= DISCOVERY_TOKEN_THRESHOLD) {
+                const exploration = countExplorationToolsOC(sequence);
+                const explorationRatio =
+                  (exploration.reads + exploration.searches) /
+                  Math.max(exploration.reads + exploration.searches + exploration.edits, 1);
+
+                if (explorationRatio > 0.5) {
+                  const texts = extractTextBlocksFromOC(messages);
+                  const summary = buildDiscoverySummary(texts);
+                  if (summary) {
+                    const content = `[Discovery after ${Math.round(totalTokens / 1000)}k tokens, ${sequence.length} tool calls]\n\n${summary}`;
+                    await store.insertRawMemory(content, "discovery", 1.0);
+                    discoveryStored = true;
+                  }
+                }
+              }
+
+              // --- Section C: Penalize injected memories ---
+              if (totalTokens >= PENALIZE_TOKEN_THRESHOLD) {
+                let injectedIds: string[] = sessionMeta[sessionID]?.injectedMemoryIds ?? [];
+                if (injectedIds.length === 0) {
+                  const sessionFile = join(getSessionsDir(), `${sessionID}.json`);
+                  if (existsSync(sessionFile)) {
+                    try {
+                      const session = JSON.parse(readFileSync(sessionFile, "utf-8"));
+                      if (Array.isArray(session.injected_memory_ids)) {
+                        injectedIds = session.injected_memory_ids.filter((id: any) => typeof id === "string");
+                      }
+                    } catch {
+                      // Ignore parse errors.
+                    }
+                  }
+                }
+
+                if (injectedIds.length > 0) {
+                  for (const id of injectedIds) {
+                    await store.penalizeMemory(id, 0.999);
+                  }
+                  console.error(
+                    `memelord: penalized ${injectedIds.length} injected memories (session used ${Math.round(totalTokens / 1000)}k tokens)`,
+                  );
+                }
+              }
+
+              // --- Section D: Failure pattern analysis ---
+              const failuresFile = join(getSessionsDir(), `${sessionID}.failures.jsonl`);
+              if (existsSync(failuresFile)) {
+                const failuresJsonl = readFileSync(failuresFile, "utf-8");
+                const failureMemories = analyzeFailurePatterns(failuresJsonl);
+                for (const fm of failureMemories) {
+                  await store.insertRawMemory(fm.content, fm.category, fm.weight);
+                  correctionsFound++;
+                }
+              }
+
+              // --- Section E: Log results ---
+              if (correctionsFound > 0) {
+                console.error(`memelord: stored ${correctionsFound} auto-detected corrections`);
+              }
+              if (discoveryStored) {
+                console.error("memelord: stored 1 discovery from high-token exploration");
+              }
+            } finally {
+              await store.close();
+            }
+
+            // --- Section F: Spawn detached embed-decay process ---
+            if (lastEmbedDecayPid !== null) {
+              try {
+                process.kill(lastEmbedDecayPid);
+              } catch {
+                // Process already exited.
+              }
+              lastEmbedDecayPid = null;
+            }
+
+            const projectRoot = resolve(DATA_DIR, "..");
+            const localBin = join(projectRoot, ".opencode", "node_modules", ".bin", "memelord");
+            const candidates = [
+              typeof process.env.MEMELORD_BIN === "string" && process.env.MEMELORD_BIN.length > 0
+                ? process.env.MEMELORD_BIN
+                : null,
+              existsSync(localBin) ? localBin : null,
+              "memelord",
+            ].filter((c): c is string => typeof c === "string" && c.length > 0);
+
+            const args = ["hook", "embed-decay", sessionID, DATA_DIR];
+            let spawned: number | null = null;
+            for (const cmd of candidates) {
+              try {
+                const child = spawn(cmd, args, {
+                  detached: true,
+                  stdio: "ignore",
+                  env: { ...process.env },
+                });
+                child.on("error", () => {
+                  // Swallow spawn errors to avoid crashing the plugin.
+                });
+                child.unref();
+                if (child.pid) {
+                  spawned = child.pid;
+                  break;
+                }
+              } catch {
+                // Try next candidate.
+              }
+            }
+
+            lastEmbedDecayPid = spawned;
+            if (spawned === null) {
+              console.error("memelord: failed to spawn embed-decay process (memelord not found)");
+            }
+          } catch (e: any) {
+            console.error(`memelord session.idle error: ${e.message}`);
+          }
+
           return;
         }
         default: {
