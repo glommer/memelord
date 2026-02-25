@@ -1,5 +1,5 @@
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
-import type { Part, ToolPart, ToolState } from "@opencode-ai/sdk";
+import type { Message, Part, ToolPart, ToolState } from "@opencode-ai/sdk";
 import { createMemoryStore, type MemoryStore, type Memory } from "memelord";
 import { createEmbedder } from "memelord-embedder";
 import { resolve, join } from "path";
@@ -90,7 +90,7 @@ export function getOpenCodeToolFailureSummaryFromState(
 }
 
 export function findToolPartByCallID(
-	messages: Array<{ info: unknown; parts: Part[] }>,
+	messages: Array<{ info: Message; parts: Part[] }>,
 	callID: string,
 ): ToolPart | null {
 	let found: ToolPart | null = null;
@@ -170,7 +170,7 @@ function isOutputErrorString(output: unknown): boolean {
 }
 
 export function extractToolSequencesFromOC(
-	messages: Array<{ info: unknown; parts: Part[] }>,
+	messages: Array<{ info: Message; parts: Part[] }>,
 ): ToolSequenceEntry[] {
 	const sequence: ToolSequenceEntry[] = [];
 
@@ -211,24 +211,14 @@ export type Correction = {
 };
 
 export function sumTokensFromOC(
-	messages: Array<{ info: any; parts: any[] }>,
+	messages: Array<{ info: Message; parts: Part[] }>,
 ): number {
 	let total = 0;
 	for (const message of messages) {
-		const info = message?.info;
-		if (!isRecord(info)) continue;
-		if (info.role !== "assistant") continue;
-
-		const tokens = info.tokens;
-		if (!isRecord(tokens)) continue;
-
-		const input = typeof tokens.input === "number" ? tokens.input : 0;
-		const output = typeof tokens.output === "number" ? tokens.output : 0;
-		const cache = isRecord(tokens.cache) ? tokens.cache : null;
-		const cacheWrite =
-			cache && typeof cache.write === "number" ? cache.write : 0;
-
-		total += input + output + cacheWrite;
+		if (message.info.role !== "assistant") continue;
+		total += message.info.tokens.input;
+		total += message.info.tokens.output;
+		total += message.info.tokens.cache.write;
 	}
 	return total;
 }
@@ -258,17 +248,14 @@ export function countExplorationToolsOC(sequence: Array<{ tool: string }>): {
 }
 
 export function extractTextBlocksFromOC(
-	messages: Array<{ info: any; parts: any[] }>,
+	messages: Array<{ info: Message; parts: Part[] }>,
 ): string[] {
 	const texts: string[] = [];
 	for (const message of messages) {
-		const info = message?.info;
-		if (!isRecord(info)) continue;
-		if (info.role !== "assistant") continue;
+		if (message.info.role !== "assistant") continue;
 
-		for (const part of message.parts ?? []) {
-			if (part?.type !== "text") continue;
-			if (typeof part.text !== "string") continue;
+		for (const part of message.parts) {
+			if (part.type !== "text") continue;
 			if (part.text.length <= 80) continue;
 			texts.push(part.text);
 		}
