@@ -30,6 +30,8 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@opencode-ai/plugin": "1.2.11",
+    "@opencode-ai/sdk": "1.2.11",
     "@types/node": "^22.0.0",
     "bun-types": "latest",
     "typescript": "^5.0.0"
