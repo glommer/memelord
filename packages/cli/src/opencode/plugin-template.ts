@@ -108,27 +108,109 @@ export function formatFailureEntryFromSummary(
   };
 }
 
+export function buildSessionStartContext(
+  memories: Array<Pick<Memory, "id" | "content" | "category" | "weight">>,
+): string {
+  let context = "";
+
+  if (memories.length > 0) {
+    context += "# Memories from past sessions\n\n";
+    for (const mem of memories) {
+      context += `[${mem.category}] (id: ${mem.id}, weight: ${mem.weight.toFixed(2)})\n${mem.content}\n\n`;
+    }
+  }
+
+  // Keep this block identical to packages/cli/src/claude/hooks.ts
+  context += `# Memory system instructions
+
+You have a persistent memory system available via MCP tools. Use it:
+
+1. At the START of every task, call memory_start_task with the user's request. This retrieves task-relevant memories using vector search (more precise than the weight-based ones above).
+
+2. When you self-correct (tried something that failed, then found the right approach), call memory_report with type "correction".
+
+3. When the user corrects you or shares project knowledge, call memory_report with type "user_input". The user should never have to tell you the same thing twice.
+
+4. When you discover something useful about the codebase (key file locations, architecture patterns, build/test conventions), call memory_report with type "insight". This saves future sessions from re-exploring the same codebase.
+
+5. IMPORTANT — Before finishing a task, review the memories above against what you actually found. If any memory contains incorrect information (wrong file paths, wrong function names, wrong explanations), you MUST call memory_contradict with its id to remove it. Provide the correct information so future sessions get it right. Bad memories poison every future session if not removed.
+
+6. When you finish a task, call memory_end_task with outcome metrics and rate each retrieved memory (0=ignored, 1=glanced, 2=useful, 3=directly applied).`;
+
+  return context;
+}
+
 const sessionMeta: Record<string, { injectedMemoryIds: string[]; startedAt: number }> = {};
 let lastEmbedDecayPid: number | null = null;
 
 export const MemelordPlugin: Plugin = async ({ client, directory, worktree }: PluginInput) => {
   return {
     event: async ({ event }: any) => {
-      // TODO(phase 3/5): handle session.created + session.idle
-      void client;
       void directory;
       void worktree;
-      void event;
-      void sessionMeta;
-      void lastEmbedDecayPid;
-      void createEmbedder;
-      void DISCOVERY_TOKEN_THRESHOLD;
-      void PENALIZE_TOKEN_THRESHOLD;
-      void EMBED_DECAY_DELAY_MS;
-      void writeFileSync;
-      void readFileSync;
-      void unlinkSync;
-      void spawn;
+
+      if (!event || typeof event.type !== "string") return;
+
+      switch (event.type) {
+        case "session.created": {
+          try {
+            const sessionID = (event.properties as any)?.info?.id;
+            if (typeof sessionID !== "string" || sessionID.length === 0) return;
+
+            if (!existsSync(getDbPath())) return;
+
+            const store = createLightStore(sessionID);
+            try {
+              const memories = await store.getTopByWeight(5);
+
+              const startedAt = Math.floor(Date.now() / 1000);
+              const injectedIds = memories.map((m) => m.id);
+
+              const sessionFile = join(getSessionsDir(), `${sessionID}.json`);
+              writeFileSync(
+                sessionFile,
+                JSON.stringify({
+                  session_id: sessionID,
+                  started_at: startedAt,
+                  injected_memory_ids: injectedIds,
+                }),
+              );
+
+              sessionMeta[sessionID] = { injectedMemoryIds: injectedIds, startedAt };
+
+              const context = buildSessionStartContext(memories);
+              await client.session.prompt({
+                path: { id: sessionID },
+                body: {
+                  parts: [{ type: "text", text: context }],
+                  noReply: true,
+                },
+              });
+            } finally {
+              await store.close();
+            }
+          } catch (e: any) {
+            console.error(`memelord SessionStart error: ${e.message}`);
+          }
+          return;
+        }
+        case "session.idle": {
+          // TODO(phase 5): transcript analysis + embed/decay
+          void sessionMeta;
+          void lastEmbedDecayPid;
+          void createEmbedder;
+          void DISCOVERY_TOKEN_THRESHOLD;
+          void PENALIZE_TOKEN_THRESHOLD;
+          void EMBED_DECAY_DELAY_MS;
+          void readFileSync;
+          void unlinkSync;
+          void spawn;
+          return;
+        }
+        default: {
+          return;
+        }
+      }
     },
     "tool.execute.after": async (input: any, output: any) => {
       try {

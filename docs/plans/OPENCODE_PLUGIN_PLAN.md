@@ -221,17 +221,17 @@ The CC hook receives `{ session_id, cwd }` on stdin and:
 
 All of this code goes inside the `event` handler in the generated plugin template (in `packages/cli/src/opencode/plugin-template.ts`), guarded by `if (event.type === "session.created")`.
 
-- [ ] **Guard:** Check `if (event.type !== "session.created") return` at the top (alongside the `session.idle` check — use a switch or if/else chain).
+- [x] **Guard:** Check `if (event.type !== "session.created") return` at the top (alongside the `session.idle` check — use a switch or if/else chain).
 
-- [ ] **Extract session ID:** `const sessionID = (event.properties as any).info.id` — the `session.created` event has `properties: { info: Session }` where `Session.id` is the session ID. Confirmed in Phase 1 from `EventSessionCreated` type.
+- [x] **Extract session ID:** `const sessionID = (event.properties as any).info.id` — the `session.created` event has `properties: { info: Session }` where `Session.id` is the session ID. Confirmed in Phase 1 from `EventSessionCreated` type.
 
-- [ ] **Early exit if no DB:** Check `if (!existsSync(getDbPath())) return` — if there's no memelord database yet, there are no memories to inject. Don't error, just silently return.
+- [x] **Early exit if no DB:** Check `if (!existsSync(getDbPath())) return` — if there's no memelord database yet, there are no memories to inject. Don't error, just silently return.
 
-- [ ] **Create light store:** `const store = createLightStore(sessionID)`
+- [x] **Create light store:** `const store = createLightStore(sessionID)`
 
-- [ ] **Fetch memories:** `const memories = await store.getTopByWeight(5)` — returns `Memory[]` with fields `{ id, content, category, weight, score, createdAt, retrievalCount }`.
+- [x] **Fetch memories:** `const memories = await store.getTopByWeight(5)` — returns `Memory[]` with fields `{ id, content, category, weight, score, createdAt, retrievalCount }`.
 
-- [ ] **Record session metadata to disk:**
+- [x] **Record session metadata to disk:**
   ```ts
   const sessionFile = join(getSessionsDir(), `${sessionID}.json`)
   writeFileSync(sessionFile, JSON.stringify({
@@ -241,13 +241,13 @@ All of this code goes inside the `event` handler in the generated plugin templat
   }))
   ```
 
-- [ ] **Record session metadata in-memory:** `sessionMeta[sessionID] = { injectedMemoryIds: memories.map(m => m.id), startedAt: Math.floor(Date.now() / 1000) }`
+- [x] **Record session metadata in-memory:** `sessionMeta[sessionID] = { injectedMemoryIds: memories.map(m => m.id), startedAt: Math.floor(Date.now() / 1000) }`
 
-- [ ] **Build context string — memories section:** If `memories.length > 0`, start with `"# Memories from past sessions\n\n"`, then for each memory append `[${mem.category}] (id: ${mem.id}, weight: ${mem.weight.toFixed(2)})\n${mem.content}\n\n`. This must match the CC format exactly (see `packages/cli/src/claude/hooks.ts:77-83`).
+- [x] **Build context string — memories section:** If `memories.length > 0`, start with `"# Memories from past sessions\n\n"`, then for each memory append `[${mem.category}] (id: ${mem.id}, weight: ${mem.weight.toFixed(2)})\n${mem.content}\n\n`. This must match the CC format exactly (see `packages/cli/src/claude/hooks.ts:77-83`).
 
-- [ ] **Build context string — instructions section:** Append the full `# Memory system instructions` block. Copy the exact text from `packages/cli/src/claude/hooks.ts:85-99`. This is a multi-line string with 6 numbered items covering: `memory_start_task`, `memory_report` (correction), `memory_report` (user_input), `memory_report` (insight), `memory_contradict`, and `memory_end_task`. The text must be identical to the CC version.
+- [x] **Build context string — instructions section:** Append the full `# Memory system instructions` block. Copy the exact text from `packages/cli/src/claude/hooks.ts:85-99`. This is a multi-line string with 6 numbered items covering: `memory_start_task`, `memory_report` (correction), `memory_report` (user_input), `memory_report` (insight), `memory_contradict`, and `memory_end_task`. The text must be identical to the CC version.
 
-- [ ] **Inject context:** Call:
+- [x] **Inject context:** Call:
   ```ts
   await client.session.prompt({
     path: { id: sessionID },
@@ -259,17 +259,17 @@ All of this code goes inside the `event` handler in the generated plugin templat
   ```
   The `noReply: true` flag tells OpenCode to add this as context without triggering an agent response. If this causes timing issues (e.g. the session isn't ready when `session.created` fires), consider using the async variant `client.session.promptAsync()` instead.
 
-- [ ] **Close the store:** `await store.close()`
+- [x] **Close the store:** `await store.close()`
 
-- [ ] **Error handling:** Wrap the entire `session.created` block in try/catch. On error, `console.error(\`memelord SessionStart error: ${e.message}\`)`. Never throw — a plugin error must not break the session.
+- [x] **Error handling:** Wrap the entire `session.created` block in try/catch. On error, `console.error(\`memelord SessionStart error: ${e.message}\`)`. Never throw — a plugin error must not break the session.
 
 #### 3.2 Extract `buildSessionStartContext` as a named function
 
 To support Phase 8 parity testing, the context-building logic should be a standalone function within the template:
 
-- [ ] Define `function buildSessionStartContext(memories: Array<{ id: string; content: string; category: string; weight: number }>): string` inside the plugin template file `packages/cli/src/opencode/plugin-template.ts` (before the plugin export). Export it so it can be imported by tests (Phase 8).
-- [ ] Move the memories-section + instructions-section string building into this function.
-- [ ] Call it from the `session.created` handler: `const context = buildSessionStartContext(memories)`
+- [x] Define `function buildSessionStartContext(memories: Array<{ id: string; content: string; category: string; weight: number }>): string` inside the plugin template file `packages/cli/src/opencode/plugin-template.ts` (before the plugin export). Export it so it can be imported by tests (Phase 8).
+- [x] Move the memories-section + instructions-section string building into this function.
+- [x] Call it from the `session.created` handler: `const context = buildSessionStartContext(memories)`
 
 ---
 
