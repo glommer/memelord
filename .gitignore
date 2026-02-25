@@ -7,3 +7,4 @@ dist/
 bun.lock
 benchmark/.turso-workdir/
 benchmark/results/
+.helix
