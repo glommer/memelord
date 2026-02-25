@@ -37,7 +37,7 @@ The plugin is a **single generated `.ts` file** placed at `.opencode/plugins/mem
   package.json           # Generated/updated by `memelord init` (depends on memelord)
 ```
 
-The plugin template lives in a dedicated file `packages/cli/src/opencode-plugin-template.ts`. The `createEmbedder` function is exported from the `memelord` SDK package so the plugin can import it directly.
+The plugin source lives as a **real TypeScript file** at `packages/cli/src/opencode-plugin-template.ts` — not a template string. It uses a `__DATA_DIR__` placeholder constant that `generatePluginSource()` replaces with the actual path at generation time. This gives full IDE support (type checking, autocompletion, refactoring) during development. The `createEmbedder` function is exported from the `memelord` SDK package as an optional capability — `@huggingface/transformers` is an optional dependency, and `createEmbedder` uses a dynamic `import()` with a clear error message if the package isn't installed.
 
 ---
 
@@ -111,19 +111,39 @@ The `SessionPromptData` type confirms `noReply?: boolean` is a supported body fi
 
 ## Phase 2: Scaffold the plugin template
 
-**Goal:** Create the plugin template that `memelord init` will generate, with stub implementations for each hook. The template is a function that returns a complete `.ts` source string with the `DATA_DIR` path baked in.
+**Goal:** Create the plugin source file as real TypeScript with a placeholder constant, and a generator function that performs the substitution. This approach gives full IDE support (type checking, autocompletion, refactoring) during development while still allowing `memelord init` to bake in the correct `DATA_DIR` path at generation time.
+
+### Approach: Real `.ts` file with placeholder replacement
+
+Instead of embedding the entire plugin source inside a template literal string (which would lose all IDE support), the plugin is written as a **real TypeScript file** at `packages/cli/src/opencode-plugin-template.ts`. It uses a placeholder constant:
+
+```ts
+const DATA_DIR = "__DATA_DIR__"
+```
+
+The `generatePluginSource()` function reads this file's source, replaces `"__DATA_DIR__"` with the actual path, and returns the result. This is a simple string replacement — no AST manipulation needed.
 
 ### Tasks
 
-#### 2.1 Create the template generator file
+#### 2.1 Create the plugin source file
 
 - [ ] Create new file `packages/cli/src/opencode-plugin-template.ts`
-- [ ] Add a single named export: `export function generatePluginSource(config: { dataDir: string }): string`
-- [ ] The function returns a template literal string containing the full plugin source code. Use `config.dataDir` to interpolate the `DATA_DIR` constant.
+- [ ] This is a **real TypeScript file** — not a template string generator. It contains the actual plugin source code with a placeholder for `DATA_DIR`.
+- [ ] At the bottom of the file (or in a separate file `packages/cli/src/opencode-plugin-generator.ts`), export the generator function:
+  ```ts
+  export function generatePluginSource(config: { dataDir: string }): string
+  ```
+  This function:
+  1. Reads the source of `opencode-plugin-template.ts` using `readFileSync(__filename)` (or reads from a known path relative to the package)
+  2. Replaces the placeholder `"__DATA_DIR__"` (including quotes) with `"${config.dataDir}"` (the actual path, quoted)
+  3. Strips out the `generatePluginSource` function itself and its imports (since the generated file shouldn't contain the generator)
+  4. Returns the resulting string
 
-#### 2.2 Define the plugin source structure (inside the template literal)
+  **Alternative (simpler):** If reading `__filename` at runtime is fragile across build targets, keep the generator in a separate file `packages/cli/src/opencode-plugin-generator.ts` that imports and re-exports the template content. The key constraint is that `opencode-plugin-template.ts` must be valid TypeScript that the IDE can check.
 
-The generated `.ts` file must contain these sections in order:
+#### 2.2 Define the plugin source structure (in `opencode-plugin-template.ts`)
+
+The file is real TypeScript with these sections in order:
 
 - [ ] **Imports block:**
   ```ts
@@ -134,7 +154,7 @@ The generated `.ts` file must contain these sections in order:
   import { spawn } from "child_process"
   ```
 
-- [ ] **Config constant:** `const DATA_DIR = "${config.dataDir}"` — the absolute path to the `.memelord` directory, interpolated at generation time.
+- [ ] **Config constant with placeholder:** `const DATA_DIR = "__DATA_DIR__"` — replaced at generation time by `generatePluginSource()` with the absolute path to the `.memelord` directory.
 
 - [ ] **Threshold constants:**
   ```ts
@@ -155,8 +175,10 @@ The generated `.ts` file must contain these sections in order:
     injectedMemoryIds: string[]
     startedAt: number
   }> = {}
+
+  let lastEmbedDecayPid: number | null = null
   ```
-  Note: no `processedSessions` Set — we mirror CC behavior where the `Stop` hook runs fresh every turn without deduplication.
+  Note: no `processedSessions` Set — we mirror CC behavior where the `Stop` hook runs fresh every turn without deduplication. The `lastEmbedDecayPid` tracks the PID of the most recently spawned embed-decay process so we can kill it before spawning a new one (see Phase 5.9).
 
 - [ ] **Plugin export:** `export const MemelordPlugin: Plugin = async ({ client, directory, worktree }) => { ... }`
 
@@ -164,14 +186,15 @@ The generated `.ts` file must contain these sections in order:
   - `event: async ({ event }) => { /* TODO: handle session.created and session.idle */ }`
   - `"tool.execute.after": async (input, output) => { /* TODO: detect and record failures */ }`
 
-#### 2.3 Verify the template generates valid TypeScript
+#### 2.3 Verify the template is valid TypeScript
 
-- [ ] Write a quick smoke check: call `generatePluginSource({ dataDir: "/tmp/test-memelord" })`, write the result to a temp `.ts` file, and run `bun build --no-bundle` or `tsc --noEmit` against it to confirm it parses without syntax errors. (This can be a manual check or a simple script.)
+- [ ] Since the plugin template is now a real `.ts` file, verify it compiles by running `tsc --noEmit` against it (may need a temporary `tsconfig` that includes the file with the right module resolution). Alternatively, rely on the IDE's TypeScript language service to confirm no errors.
+- [ ] Write a quick smoke check: call `generatePluginSource({ dataDir: "/tmp/test-memelord" })`, write the result to a temp `.ts` file, and verify that `__DATA_DIR__` has been replaced with the actual path and the result is still valid TypeScript.
 
 #### 2.4 Integrate template into `memelord init` (stub — full init update in Phase 6)
 
-- [ ] At the bottom of `packages/cli/src/opencode-plugin-template.ts`, add a JSDoc comment explaining:
-  - This file is used by `memelord init` (in `packages/cli/src/index.ts`)
+- [ ] Add a JSDoc comment on `generatePluginSource` explaining:
+  - This function is used by `memelord init` (in `packages/cli/src/index.ts`)
   - The generated file is placed at `{targetDir}/.opencode/plugins/memelord.ts`
   - The generated file depends on `memelord` being in `.opencode/package.json` dependencies
 
@@ -244,7 +267,7 @@ All of this code goes inside the `event` handler in the generated plugin templat
 
 To support Phase 8 parity testing, the context-building logic should be a standalone function within the template:
 
-- [ ] Define `function buildSessionStartContext(memories: Array<{ id: string; content: string; category: string; weight: number }>): string` inside the generated plugin source (before the plugin export).
+- [ ] Define `function buildSessionStartContext(memories: Array<{ id: string; content: string; category: string; weight: number }>): string` inside the plugin template file `packages/cli/src/opencode-plugin-template.ts` (before the plugin export). Export it so it can be imported by tests (Phase 8).
 - [ ] Move the memories-section + instructions-section string building into this function.
 - [ ] Call it from the `session.created` handler: `const context = buildSessionStartContext(memories)`
 
@@ -282,7 +305,7 @@ The `output.output` field is always a string. The `output.metadata` field is an 
 
 #### 4.1 Define the `isOpenCodeToolFailure` function
 
-Inside the generated plugin source (before the plugin export), define:
+Inside the plugin template file `packages/cli/src/opencode-plugin-template.ts` (before the plugin export), define:
 
 - [ ] `function isOpenCodeToolFailure(toolName: string, outputStr: string, metadata: any): boolean`
 - [ ] The function checks these conditions (any match returns `true`):
@@ -377,7 +400,7 @@ The `session.idle` event handler is split into two independent concerns:
 
 #### 5.1 Define `extractToolSequencesFromOC` function
 
-Inside the generated plugin source, define:
+Inside the plugin template file `packages/cli/src/opencode-plugin-template.ts`, define:
 
 - [ ] `function extractToolSequencesFromOC(messages: Array<{ info: any; parts: any[] }>): Array<{ tool: string; input: any; failed: boolean }>`
 - [ ] Iterate over each message in `messages`
@@ -544,6 +567,19 @@ Inside the `event` handler, add the `session.idle` branch. This runs inline in t
 
 After Section F (closing the light store), still inside the `session.idle` handler's try block:
 
+- [ ] **Kill previous embed-decay process (if any):** Before spawning a new embed-decay process, kill the previously spawned one to avoid multiple processes waking up simultaneously and competing for SQLite locks:
+  ```ts
+  if (lastEmbedDecayPid !== null) {
+    try {
+      process.kill(lastEmbedDecayPid)
+    } catch {
+      // Process already exited — that's fine
+    }
+    lastEmbedDecayPid = null
+  }
+  ```
+  The `lastEmbedDecayPid` variable is defined in module-level state (Phase 2.2). `process.kill()` sends `SIGTERM` by default. If the process has already exited, it throws `ESRCH` which we silently catch. This ensures only the most recent embed-decay process runs — earlier ones are cancelled before they wake up from their 5-minute sleep.
+
 - [ ] **Spawn detached embed-decay process:**
   ```ts
   const memelordBin = process.env.MEMELORD_BIN ?? "memelord"
@@ -553,12 +589,15 @@ After Section F (closing the light store), still inside the `session.idle` handl
     env: { ...process.env },
   })
   child.unref()
+  lastEmbedDecayPid = child.pid ?? null
   ```
 
   The `detached: true` + `child.unref()` pattern creates a background process that:
   - Is not killed when the parent (OpenCode) exits
   - Has no stdio connections to the parent
   - Runs independently until it finishes
+
+  We store `child.pid` in `lastEmbedDecayPid` so the next `session.idle` event can kill it before spawning a replacement. If the parent (OpenCode) exits before the next idle event, the detached process continues running normally — there's no one left to kill it, which is the desired behavior.
 
   The `memelord hook embed-decay` command (implemented in Phase 5.10) will:
   1. Sleep for 5 minutes (`EMBED_DECAY_DELAY_MS`)
@@ -574,11 +613,13 @@ After Section F (closing the light store), still inside the `session.idle` handl
     // primary: use `memelord` from PATH
     const child = spawn("memelord", [...], { detached: true, stdio: "ignore" })
     child.unref()
+    lastEmbedDecayPid = child.pid ?? null
   } catch {
     try {
       // fallback: use node with the CLI script path
       const child = spawn(process.execPath, [join(DATA_DIR, "..", "node_modules", ".bin", "memelord"), ...], { detached: true, stdio: "ignore" })
       child.unref()
+      lastEmbedDecayPid = child.pid ?? null
     } catch (e2: any) {
       console.error(`memelord: failed to spawn embed-decay process: ${e2.message}`)
     }
@@ -652,23 +693,43 @@ Add a new hook event handler in `packages/cli/src/hooks.ts` and register it in t
 
 - [ ] **Note on process.argv indexing:** The CLI dispatch in `packages/cli/src/index.ts` calls `runHook(process.argv[3])` for `memelord hook <event>`. The `embed-decay` handler reads additional args from `process.argv[4]` (sessionId) and `process.argv[5]` (dataDir).
 
-#### 5.11 Export `createEmbedder` from the SDK package
+#### 5.11 Export `createEmbedder` from the SDK package (optional dependency)
 
-The plugin imports `createEmbedder` from `memelord` (the SDK package). Currently `createEmbedder` lives in `packages/cli/src/embedder.ts`. We need to move it to the SDK or re-export it.
+The plugin imports `createEmbedder` from `memelord` (the SDK package). Currently `createEmbedder` lives in `packages/cli/src/embedder.ts`. We need to move it to the SDK. However, `@huggingface/transformers` is a heavy dependency (~22M model download) that not all SDK consumers need — e.g. the MCP server only uses the store, never the embedder. To keep the SDK lightweight, `@huggingface/transformers` is an **optional dependency** and `createEmbedder` uses a dynamic `import()` with a clear error if the package isn't installed.
 
-- [ ] **Add `createEmbedder` to the SDK package.** Create `packages/sdk/src/embedder.ts` with the same implementation as `packages/cli/src/embedder.ts`:
+- [ ] **Add `createEmbedder` to the SDK package.** Create `packages/sdk/src/embedder.ts`:
   ```ts
   import type { EmbedFn } from "./types.js"
 
   let cachedEmbedder: EmbedFn | null = null
 
+  /**
+   * Create a local embedding function using @huggingface/transformers.
+   * Downloads the model on first use and caches it locally.
+   *
+   * Default: Xenova/all-MiniLM-L6-v2 (384 dimensions, ~22M params)
+   * With quantized=true (default), uses the q8 (8-bit) ONNX variant.
+   *
+   * Requires `@huggingface/transformers` to be installed. This is an optional
+   * dependency of the `memelord` package — if you need embedding support,
+   * install it explicitly: `npm install @huggingface/transformers`
+   */
   export async function createEmbedder(opts?: {
     model?: string
     quantized?: boolean
   }): Promise<EmbedFn> {
     if (cachedEmbedder) return cachedEmbedder
 
-    const { pipeline } = await import("@huggingface/transformers")
+    let pipeline: any
+    try {
+      const transformers = await import("@huggingface/transformers")
+      pipeline = transformers.pipeline
+    } catch {
+      throw new Error(
+        "createEmbedder requires @huggingface/transformers to be installed. " +
+        "Install it with: npm install @huggingface/transformers"
+      )
+    }
 
     const model = opts?.model ?? process.env.MEMELORD_MODEL ?? "Xenova/all-MiniLM-L6-v2"
     const quantized = opts?.quantized ?? true
@@ -684,16 +745,28 @@ The plugin imports `createEmbedder` from `memelord` (the SDK package). Currently
   }
   ```
 
+  Key difference from the CLI version: the dynamic `import("@huggingface/transformers")` is wrapped in a try/catch that throws a descriptive error if the package isn't installed, rather than letting the import error propagate with a confusing message.
+
 - [ ] **Export from SDK index:** Add to `packages/sdk/src/index.ts`:
   ```ts
   export { createEmbedder } from "./embedder.js"
   ```
 
+- [ ] **Add `@huggingface/transformers` as an optional dependency of the SDK package.** Update `packages/sdk/package.json`:
+  ```json
+  {
+    "optionalDependencies": {
+      "@huggingface/transformers": "^3.4.0"
+    }
+  }
+  ```
+  This means `npm install memelord` will attempt to install `@huggingface/transformers` but won't fail if it can't (e.g. platform-specific ONNX issues). Consumers who explicitly need embedding can `npm install @huggingface/transformers` directly. The `memelord` plugin's `.opencode/package.json` will include it as a direct dependency since the plugin always needs it for the embed-decay flow.
+
 - [ ] **Update CLI embedder to re-export from SDK:** Update `packages/cli/src/embedder.ts` to re-export from the SDK to avoid duplication:
   ```ts
   export { createEmbedder } from "memelord"
   ```
-  This ensures the CLI and SDK stay in sync. The `@huggingface/transformers` dependency is already in the root `package.json`.
+  This ensures the CLI and SDK stay in sync. The `@huggingface/transformers` dependency remains a direct (non-optional) dependency in the root `package.json` since the CLI always needs it.
 
 - [ ] **Update `tsconfig.build.json`:** Ensure `packages/sdk/src/embedder.ts` is included in the build output. Check that the existing `include` pattern (`packages/sdk/src/**/*.ts`) already covers it.
 
@@ -709,7 +782,7 @@ The init command is in `packages/cli/src/index.ts:260-396`. The OpenCode MCP con
 
 #### 6.1 Add import for the template generator
 
-- [ ] At the top of `packages/cli/src/index.ts`, add: `import { generatePluginSource } from "./opencode-plugin-template.js"`
+- [ ] At the top of `packages/cli/src/index.ts`, add: `import { generatePluginSource } from "./opencode-plugin-generator.js"` (or `"./opencode-plugin-template.js"` depending on where the generator function lives — see Phase 2.1)
   - Note: use `.js` extension (not `.ts`) because this is the Node-compatible import path used after compilation.
 
 #### 6.2 Add OpenCode plugin generation step to `memelord init`
@@ -737,20 +810,46 @@ Insert a new numbered section after step 5 (OpenCode MCP config, line ~336) and 
     try { ocPkg = JSON.parse(readFileSync(ocPkgPath, "utf-8")) } catch {}
   }
   if (!ocPkg.dependencies) ocPkg.dependencies = {}
-  ocPkg.dependencies.memelord = "^0.1.4"
+
+  // Dynamically read the current memelord version from root package.json
+  const rootPkgPath = join(__dirname, "..", "..", "..", "package.json")
+  let memelordVersion = "0.1.4" // fallback
+  try {
+    const rootPkg = JSON.parse(readFileSync(rootPkgPath, "utf-8"))
+    if (rootPkg.version) memelordVersion = rootPkg.version
+  } catch {}
+  ocPkg.dependencies.memelord = `^${memelordVersion}`
+
   writeFileSync(ocPkgPath, JSON.stringify(ocPkg, null, 2) + "\n")
   console.log("  Wrote .opencode/package.json (OpenCode plugin dependencies)")
   ```
-  - **Note:** The version `^0.1.4` should match the current package version from `package.json`. If the version has been bumped, update this accordingly. Since `createEmbedder` is now exported from the SDK, the plugin only needs the `memelord` dependency — `@huggingface/transformers` is a transitive dependency of `memelord`.
+  - **Note:** The version is read dynamically from the root `package.json` at init time so it stays in sync automatically when the package version is bumped. The `__dirname` resolution depends on the build target — if the CLI is bundled to `dist/cli.mjs`, the relative path `../../..` may need adjustment. Verify the path resolves correctly in both development (`bun run packages/cli/src/index.ts`) and production (`node dist/cli.mjs`) modes.
+  - **Note on `@huggingface/transformers`:** Since `createEmbedder` is now exported from the SDK with `@huggingface/transformers` as an **optional** dependency, and the plugin needs embedding support for the embed-decay flow, the `.opencode/package.json` should also include `@huggingface/transformers` as a direct dependency:
+    ```ts
+    ocPkg.dependencies["@huggingface/transformers"] = "^3.4.0"
+    ```
+    This ensures the transformers package is always installed in the plugin's `node_modules`, even though it's optional at the SDK level.
 
-#### 6.3 Update the help text
+#### 6.3 Upgrade `@opencode-ai/plugin` to latest version
+
+- [ ] The existing `.opencode/package.json` in the memelord repo pins `@opencode-ai/plugin` at `1.2.11`. Before implementing the plugin, upgrade to the latest version to ensure all required hooks (`tool.execute.after`, `session.created`, `session.idle`) are available:
+  ```bash
+  cd .opencode && bun install @opencode-ai/plugin@latest
+  ```
+- [ ] Verify that the `Plugin` type from the latest version supports the hook signatures used in the plugin template (event handler, tool.execute.after handler).
+- [ ] Update the generated `.opencode/package.json` in `memelord init` to include the latest `@opencode-ai/plugin` version:
+  ```ts
+  ocPkg.dependencies["@opencode-ai/plugin"] = "latest"  // or pin to the verified version
+  ```
+
+#### 6.4 Update the help text
 
 - [ ] In the help text at `packages/cli/src/index.ts:398-420`, update the `memelord init [dir]` description line to mention the plugin:
   ```
   memelord init [dir]           Set up memelord for a project (Claude Code, Codex, OpenCode plugin+MCP, OpenClaw)
   ```
 
-#### 6.4 Verify init produces correct output
+#### 6.5 Verify init produces correct output
 
 - [ ] Run `memelord init /tmp/test-memelord-init` manually
 - [ ] Verify these files were created:
@@ -758,7 +857,7 @@ Insert a new numbered section after step 5 (OpenCode MCP config, line ~336) and 
   - [ ] `/tmp/test-memelord-init/.mcp.json` has `memelord` MCP server entry
   - [ ] `/tmp/test-memelord-init/opencode.json` has `memelord` MCP entry
   - [ ] `/tmp/test-memelord-init/.opencode/plugins/memelord.ts` exists and contains valid TypeScript
-  - [ ] `/tmp/test-memelord-init/.opencode/package.json` has `memelord` in dependencies (no separate `@huggingface/transformers` needed)
+  - [ ] `/tmp/test-memelord-init/.opencode/package.json` has `memelord` and `@huggingface/transformers` in dependencies, plus `@opencode-ai/plugin`
   - [ ] Console output includes lines for both OpenCode MCP and OpenCode plugin
 - [ ] Clean up: `rm -rf /tmp/test-memelord-init`
 
@@ -772,7 +871,7 @@ Insert a new numbered section after step 5 (OpenCode MCP config, line ~336) and 
 
 - [ ] Create a fresh test directory: `mkdir /tmp/memelord-e2e-test && cd /tmp/memelord-e2e-test && git init`
 - [ ] Run `memelord init .` in the test directory
-- [ ] Verify all expected files exist (see Phase 6.4 checklist)
+- [ ] Verify all expected files exist (see Phase 6.5 checklist)
 - [ ] Run `cd .opencode && bun install` to install plugin dependencies
 
 ### 7.2 Test: Plugin loads without errors
@@ -815,13 +914,15 @@ Insert a new numbered section after step 5 (OpenCode MCP config, line ~336) and 
   - [ ] Run `memelord memories` and verify that memories have embeddings (check the `emb=` field shows "OK" not "pending")
   - [ ] Check that session temp files were cleaned up: `.memelord/sessions/{sessionID}.json` and `.failures.jsonl` should be deleted
 
-### 7.7 Test: Multi-turn analysis (no idempotency guard)
+### 7.7 Test: Multi-turn analysis (no idempotency guard) + embed-decay process replacement
 
 - [ ] In a session, complete one turn and let it go idle
 - [ ] Verify the analysis ran (check for console output or new memories)
+- [ ] Note the PID of the spawned embed-decay process: `ps aux | grep embed-decay`
 - [ ] Send another prompt in the same session, let it go idle again
 - [ ] Verify the analysis ran again on the second idle (this mirrors CC behavior)
-- [ ] Check that the embed-decay process was spawned again (a second detached process)
+- [ ] Verify that the previous embed-decay process was killed (its PID should no longer appear in `ps aux`)
+- [ ] Verify that a new embed-decay process was spawned with a different PID
 
 ### 7.8 Test: Embed-decay survives OpenCode exit
 
@@ -854,16 +955,26 @@ The pure-logic functions defined in Phases 3-5 (`buildSessionStartContext`, `det
 
 ### Tasks
 
-#### 8.1 Create a testable module from the plugin template functions
+#### 8.1 Ensure plugin template functions are importable for testing
 
-The generated plugin is a string template, so its functions aren't directly importable. To make them testable:
+Since the plugin template is now a **real TypeScript file** (not a template string), its pure functions are directly importable for testing. No separate `opencode-plugin-functions.ts` extraction is needed — the functions live in `packages/cli/src/opencode-plugin-template.ts` and can be imported directly.
 
-- [ ] Create `packages/cli/src/opencode-plugin-functions.ts` that exports the pure functions as real TypeScript (not inside a template string). These are the same functions that appear in the generated plugin but in a directly importable form:
-  - [ ] `export function buildSessionStartContext(memories: Array<{ id: string; content: string; category: string; weight: number }>): string`
-  - [ ] `export function detectCorrections(sequence: Array<{ tool: string; input: any; failed: boolean }>): Array<{ failedTool: string; failedInput: string; succeededTool: string; succeededInput: string }>`
-  - [ ] `export function buildDiscoverySummary(texts: string[]): string | null`
-  - [ ] `export function analyzeFailurePatterns(failuresJsonl: string): Array<{ content: string; category: "correction"; weight: number }>`
-- [ ] Update the plugin template in `opencode-plugin-template.ts` to generate these same function bodies (keep them in sync manually — the source of truth is `opencode-plugin-functions.ts`, and the template should match)
+- [ ] Verify that the pure functions in `packages/cli/src/opencode-plugin-template.ts` are exported (or can be imported) for testing:
+  - [ ] `buildSessionStartContext`
+  - [ ] `detectCorrections`
+  - [ ] `buildDiscoverySummary`
+  - [ ] `analyzeFailurePatterns`
+- [ ] If the functions are not exported from the plugin template (because the generated file shouldn't have extra exports), create a thin re-export file `packages/cli/src/opencode-plugin-functions.ts` that imports and re-exports them:
+  ```ts
+  export {
+    buildSessionStartContext,
+    detectCorrections,
+    buildDiscoverySummary,
+    analyzeFailurePatterns,
+  } from "./opencode-plugin-template.js"
+  ```
+  This keeps the source of truth in one place (the template file) while providing a clean import path for tests. Since the template is real TypeScript, these are the actual implementations — not copies.
+- [ ] **Note:** The `__DATA_DIR__` placeholder in the template file won't affect testability of pure functions since none of them reference `DATA_DIR`.
 
 #### 8.2 Write context builder tests
 
@@ -928,10 +1039,12 @@ The two implementations operate in fundamentally different execution contexts:
 
 Sharing code would require abstracting over these differences (I/O, state management, API access patterns), which adds complexity without clear benefit. The core algorithms (correction detection, discovery detection, failure analysis) are ~50-100 lines each — small enough that duplication is acceptable and independent evolution is desirable.
 
-### Why a single generated file?
+### Why a real `.ts` file with placeholder replacement?
 
 - OpenCode loads plugins from `.opencode/plugins/`. A single file is the simplest unit.
-- The plugin needs runtime config (DATA_DIR path). String interpolation at generation time is simpler than a separate config file.
+- The plugin needs runtime config (DATA_DIR path). A `__DATA_DIR__` placeholder replaced at generation time is simpler than a separate config file.
+- **Why not a template string?** A template literal string containing the entire plugin source would lose all IDE support — no type checking, no autocompletion, no refactoring, no error detection during development. The real `.ts` file approach gives full IDE support while still allowing `memelord init` to bake in the correct path via simple string replacement.
+- The `generatePluginSource()` function reads the template file, replaces `"__DATA_DIR__"` with the actual path, and optionally strips the generator function itself from the output.
 - If the plugin grows beyond ~300 lines, extract to a directory (`memelord/index.ts` + helpers), but start simple.
 
 ### Why no idempotency guard on transcript analysis?
@@ -953,13 +1066,38 @@ Instead, the plugin spawns `memelord hook embed-decay <sessionId> <dataDir>` as 
 
 The 5-minute delay is configurable via `MEMELORD_EMBED_DELAY_MS` environment variable for testing.
 
-### Why export `createEmbedder` from the SDK?
+### Why kill previous embed-decay before spawning a new one?
+
+In a multi-turn session, each `session.idle` event spawns a detached embed-decay process with a 5-minute delay. Without intervention, multiple processes could wake up simultaneously and compete for SQLite locks, causing lock contention errors or redundant work.
+
+The solution is simple: track the PID of the last spawned embed-decay process in module-level state (`lastEmbedDecayPid`). Before spawning a new one, send `SIGTERM` to the previous process (silently catching `ESRCH` if it already exited). This ensures only the most recent embed-decay process runs — earlier ones are cancelled while still sleeping.
+
+Edge case: if OpenCode exits between turns, there's no parent process to kill the detached child. This is fine — the child will wake up after 5 minutes and do its work. The kill-previous logic only applies within a single OpenCode session where the plugin has persistent state.
+
+### Why export `createEmbedder` from the SDK as an optional capability?
 
 The `createEmbedder` function was originally in `packages/cli/src/embedder.ts`. The plugin needs it but shouldn't depend on the CLI package. Moving it to the SDK (`packages/sdk/src/embedder.ts`) and re-exporting from the SDK index means:
 - The plugin only needs `memelord` as a dependency (not `memelord-cli`)
-- `@huggingface/transformers` becomes a transitive dependency of `memelord`
 - The CLI re-exports from the SDK, keeping both in sync
 - The `createEmbedder` function is small (~20 lines) and has no CLI-specific dependencies
+
+**Why optional dependency instead of hard dependency?** `@huggingface/transformers` is a heavy package (downloads a ~22M ONNX model on first use, has platform-specific native bindings). Not all SDK consumers need embedding — for example, the MCP server only uses the store for CRUD operations and never calls `createEmbedder`. Making it a hard dependency would:
+1. Increase install size for all SDK consumers
+2. Potentially fail on platforms where ONNX bindings aren't available
+3. Force users who only need the store to install unnecessary dependencies
+
+Instead, `@huggingface/transformers` is listed as an `optionalDependency` in the SDK's `package.json`. The `createEmbedder` function uses a dynamic `import()` wrapped in a try/catch that throws a clear error message if the package isn't installed:
+
+```
+createEmbedder requires @huggingface/transformers to be installed.
+Install it with: npm install @huggingface/transformers
+```
+
+The plugin's `.opencode/package.json` includes `@huggingface/transformers` as a **direct** dependency since the plugin always needs it for the embed-decay flow. The root `package.json` also keeps it as a direct dependency since the CLI always needs it.
+
+### Dynamic SDK version in generated package.json
+
+The `memelord init` command generates `.opencode/package.json` with a `memelord` dependency. Rather than hardcoding a version string (e.g. `"^0.1.4"`) that would drift as the package is bumped, the version is read dynamically from the root `package.json` at init time. This ensures the generated dependency always matches the installed version of memelord. The fallback value (`"0.1.4"`) is only used if the root `package.json` can't be read for some reason.
 
 ### Context injection: noReply prompt only
 
