@@ -32,6 +32,47 @@ function createLightStore(sessionId: string): MemoryStore {
   });
 }
 
+export function isOpenCodeToolFailure(toolName: string, outputStr: string, metadata: any): boolean {
+  void toolName;
+
+  const checkStr = (outputStr ?? "").slice(0, 200);
+  if (
+    checkStr.startsWith("Error:") ||
+    checkStr.startsWith("error:") ||
+    checkStr.includes("ENOENT") ||
+    checkStr.includes("command not found") ||
+    checkStr.includes("No such file") ||
+    checkStr.includes("Permission denied")
+  ) {
+    return true;
+  }
+
+  if (metadata && typeof metadata === "object") {
+    if (typeof metadata.exit === "number" && metadata.exit !== 0) return true;
+    if (typeof metadata.exitCode === "number" && metadata.exitCode !== 0) return true;
+    if (metadata.success === false) return true;
+    if (metadata.isError === true) return true;
+  }
+
+  return false;
+}
+
+export function formatFailureEntry(
+  toolName: string,
+  toolInput: any,
+  outputStr: string,
+  metadata: any,
+): { timestamp: number; tool_name: string; tool_input: any; error_summary: string } {
+  const meta = metadata && typeof metadata === "object" ? metadata : null;
+  const errorSummary = (meta?.error ?? meta?.message ?? outputStr ?? "").slice(0, 500);
+  return {
+    timestamp: Math.floor(Date.now() / 1000),
+    tool_name: toolName,
+    tool_input: toolInput,
+    error_summary: errorSummary,
+  };
+}
+
 const sessionMeta: Record<string, { injectedMemoryIds: string[]; startedAt: number }> = {};
 let lastEmbedDecayPid: number | null = null;
 
@@ -55,11 +96,22 @@ export const MemelordPlugin: Plugin = async ({ client, directory, worktree }: an
       void spawn;
     },
     "tool.execute.after": async (input: any, output: any) => {
-      // TODO(phase 4): detect + record failures to sessions/<id>.failures.jsonl
-      void input;
-      void output;
-      void appendFileSync;
-      void getSessionsDir;
+      try {
+        const toolName = input?.tool ?? "unknown";
+        const sessionID = input?.sessionID ?? "unknown";
+        const toolInput = input?.args;
+
+        const outputStr = output?.output ?? "";
+        const metadata = output?.metadata;
+
+        if (!isOpenCodeToolFailure(toolName, outputStr, metadata)) return;
+
+        const entry = formatFailureEntry(toolName, toolInput, outputStr, metadata);
+        const failuresFile = join(getSessionsDir(), `${sessionID}.failures.jsonl`);
+        appendFileSync(failuresFile, JSON.stringify(entry) + "\n");
+      } catch (e: any) {
+        console.error(`memelord PostToolUse error: ${e.message}`);
+      }
     },
   };
 };

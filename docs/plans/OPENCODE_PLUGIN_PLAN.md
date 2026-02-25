@@ -307,9 +307,9 @@ The `output.output` field is always a string. The `output.metadata` field is an 
 
 Inside the plugin template file `packages/cli/src/opencode/plugin-template.ts` (before the plugin export), define:
 
-- [ ] `function isOpenCodeToolFailure(toolName: string, outputStr: string, metadata: any): boolean`
-- [ ] The function checks these conditions (any match returns `true`):
-  - [ ] **String error patterns on `outputStr`:** Only check the first 200 chars to avoid false positives on file-content tools like `read`:
+- [x] `function isOpenCodeToolFailure(toolName: string, outputStr: string, metadata: any): boolean`
+- [x] The function checks these conditions (any match returns `true`):
+  - [x] **String error patterns on `outputStr`:** Only check the first 200 chars to avoid false positives on file-content tools like `read`:
     ```ts
     const checkStr = outputStr.slice(0, 200)
     ```
@@ -318,31 +318,31 @@ Inside the plugin template file `packages/cli/src/opencode/plugin-template.ts` (
     - `checkStr.includes("command not found")`
     - `checkStr.includes("No such file")`
     - `checkStr.includes("Permission denied")`
-  - [ ] **Metadata checks (if `metadata` is a non-null object):**
+  - [x] **Metadata checks (if `metadata` is a non-null object):**
     - `typeof metadata.exit === "number" && metadata.exit !== 0` — **primary** bash exit code field per Phase 1 findings
     - `typeof metadata.exitCode === "number" && metadata.exitCode !== 0` — **fallback** in case API changes
     - `metadata.success === false`
     - `metadata.isError === true`
-  - [ ] If none match, return `false`
+  - [x] If none match, return `false`
 
 #### 4.2 Define the `formatFailureEntry` function
 
-- [ ] `function formatFailureEntry(toolName: string, toolInput: any, outputStr: string, metadata: any): { timestamp: number; tool_name: string; tool_input: any; error_summary: string }`
-- [ ] `timestamp`: `Math.floor(Date.now() / 1000)`
-- [ ] `tool_name`: `toolName`
-- [ ] `tool_input`: `toolInput` (pass through as-is — this is the `input.args` from the hook)
-- [ ] `error_summary`: Extract from metadata first, then fall back to output string: `metadata?.error ?? metadata?.message ?? outputStr.slice(0, 500)`
-- [ ] The output format matches CC's failure JSONL format exactly (`{ timestamp, tool_name, tool_input, error_summary }`) so Phase 5's failure pattern analyzer can read it identically.
+- [x] `function formatFailureEntry(toolName: string, toolInput: any, outputStr: string, metadata: any): { timestamp: number; tool_name: string; tool_input: any; error_summary: string }`
+- [x] `timestamp`: `Math.floor(Date.now() / 1000)`
+- [x] `tool_name`: `toolName`
+- [x] `tool_input`: `toolInput` (pass through as-is — this is the `input.args` from the hook)
+- [x] `error_summary`: Extract from metadata first, then fall back to output string: `metadata?.error ?? metadata?.message ?? outputStr.slice(0, 500)`
+- [x] The output format matches CC's failure JSONL format exactly (`{ timestamp, tool_name, tool_input, error_summary }`) so Phase 5's failure pattern analyzer can read it identically.
 
 #### 4.3 Implement the `tool.execute.after` handler
 
 Inside the plugin's `"tool.execute.after"` handler:
 
-- [ ] **Destructure params:** The handler signature is `async (input, output) => { ... }` where `input` has `{ tool, sessionID, callID, args }` and `output` has `{ title, output: string, metadata }`.
-- [ ] **Call failure detector:** `if (!isOpenCodeToolFailure(input.tool, output.output, output.metadata)) return` — fast exit on success.
-- [ ] **Build failure entry:** `const entry = formatFailureEntry(input.tool, input.args, output.output, output.metadata)`
-- [ ] **Append to JSONL:** `appendFileSync(join(getSessionsDir(), \`${input.sessionID}.failures.jsonl\`), JSON.stringify(entry) + "\\n")`
-- [ ] **Error handling:** Wrap the entire handler body in try/catch. On error, `console.error(\`memelord PostToolUse error: ${e.message}\`)`. Never throw.
+- [x] **Destructure params:** The handler signature is `async (input, output) => { ... }` where `input` has `{ tool, sessionID, callID, args }` and `output` has `{ title, output: string, metadata }`.
+- [x] **Call failure detector:** `if (!isOpenCodeToolFailure(input.tool, output.output, output.metadata)) return` — fast exit on success.
+- [x] **Build failure entry:** `const entry = formatFailureEntry(input.tool, input.args, output.output, output.metadata)`
+- [x] **Append to JSONL:** `appendFileSync(join(getSessionsDir(), \`${input.sessionID}.failures.jsonl\`), JSON.stringify(entry) + "\\n")`
+- [x] **Error handling:** Wrap the entire handler body in try/catch. On error, `console.error(\`memelord PostToolUse error: ${e.message}\`)`. Never throw.
 
 ---
 
