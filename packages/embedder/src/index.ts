@@ -1,4 +1,5 @@
-import type { EmbedFn } from "./types.js";
+/** User-provided embedding function. Takes text, returns a vector. */
+export type EmbedFn = (text: string) => Promise<Float32Array>;
 
 let cachedEmbedder: EmbedFn | null = null;
 
@@ -8,8 +9,6 @@ let cachedEmbedder: EmbedFn | null = null;
  *
  * Default: Xenova/all-MiniLM-L6-v2 (384 dimensions, ~22M params)
  * With quantized=true (default), uses the q8 (8-bit) ONNX variant.
- *
- * Requires `@huggingface/transformers` to be installed.
  */
 export async function createEmbedder(opts?: {
   model?: string;
@@ -17,21 +16,12 @@ export async function createEmbedder(opts?: {
 }): Promise<EmbedFn> {
   if (cachedEmbedder) return cachedEmbedder;
 
-  let pipeline: any;
-  try {
-    const transformers = await import("@huggingface/transformers");
-    pipeline = transformers.pipeline;
-  } catch {
-    throw new Error(
-      "createEmbedder requires @huggingface/transformers to be installed. " +
-        "Install it with: npm install @huggingface/transformers",
-    );
-  }
+  const { pipeline } = await import("@huggingface/transformers");
 
   const model = opts?.model ?? process.env.MEMELORD_MODEL ?? "Xenova/all-MiniLM-L6-v2";
   const quantized = opts?.quantized ?? true;
 
-  const extractor = await pipeline("feature-extraction", model, { quantized });
+  const extractor = await pipeline("feature-extraction", model, { quantized } as any);
 
   cachedEmbedder = async (text: string): Promise<Float32Array> => {
     const output = await extractor(text, { pooling: "mean", normalize: true });

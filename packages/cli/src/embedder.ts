@@ -1,1 +1,1 @@
-export { createEmbedder } from "memelord";
+export { createEmbedder } from "memelord-embedder";

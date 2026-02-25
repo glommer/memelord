@@ -693,82 +693,15 @@ Add a new hook event handler in `packages/cli/src/hooks.ts` and register it in t
 
 - [ ] **Note on process.argv indexing:** The CLI dispatch in `packages/cli/src/index.ts` calls `runHook(process.argv[3])` for `memelord hook <event>`. The `embed-decay` handler reads additional args from `process.argv[4]` (sessionId) and `process.argv[5]` (dataDir).
 
-#### 5.11 Export `createEmbedder` from the SDK package (optional dependency)
+#### 5.11 Extract `createEmbedder` into `packages/embedder` (`memelord-embedder`)
 
-The plugin imports `createEmbedder` from `memelord` (the SDK package). Currently `createEmbedder` lives in `packages/cli/src/embedder.ts`. We need to move it to the SDK. However, `@huggingface/transformers` is a heavy dependency (~22M model download) that not all SDK consumers need — e.g. the MCP server only uses the store, never the embedder. To keep the SDK lightweight, `@huggingface/transformers` is an **optional dependency** and `createEmbedder` uses a dynamic `import()` with a clear error if the package isn't installed.
+`createEmbedder` lives in the dedicated `packages/embedder` workspace package (`memelord-embedder`). The SDK (`memelord`) has no knowledge of embeddings. See ADR 0005 for the rationale.
 
-- [x] **Add `createEmbedder` to the SDK package.** Create `packages/sdk/src/embedder.ts`:
-  ```ts
-  import type { EmbedFn } from "./types.js"
-
-  let cachedEmbedder: EmbedFn | null = null
-
-  /**
-   * Create a local embedding function using @huggingface/transformers.
-   * Downloads the model on first use and caches it locally.
-   *
-   * Default: Xenova/all-MiniLM-L6-v2 (384 dimensions, ~22M params)
-   * With quantized=true (default), uses the q8 (8-bit) ONNX variant.
-   *
-   * Requires `@huggingface/transformers` to be installed. This is an optional
-   * dependency of the `memelord` package — if you need embedding support,
-   * install it explicitly: `npm install @huggingface/transformers`
-   */
-  export async function createEmbedder(opts?: {
-    model?: string
-    quantized?: boolean
-  }): Promise<EmbedFn> {
-    if (cachedEmbedder) return cachedEmbedder
-
-    let pipeline: any
-    try {
-      const transformers = await import("@huggingface/transformers")
-      pipeline = transformers.pipeline
-    } catch {
-      throw new Error(
-        "createEmbedder requires @huggingface/transformers to be installed. " +
-        "Install it with: npm install @huggingface/transformers"
-      )
-    }
-
-    const model = opts?.model ?? process.env.MEMELORD_MODEL ?? "Xenova/all-MiniLM-L6-v2"
-    const quantized = opts?.quantized ?? true
-
-    const extractor = await pipeline("feature-extraction", model, { quantized })
-
-    cachedEmbedder = async (text: string): Promise<Float32Array> => {
-      const output = await extractor(text, { pooling: "mean", normalize: true })
-      return new Float32Array(output.data as Float64Array)
-    }
-
-    return cachedEmbedder
-  }
-  ```
-
-  Key difference from the CLI version: the dynamic `import("@huggingface/transformers")` is wrapped in a try/catch that throws a descriptive error if the package isn't installed, rather than letting the import error propagate with a confusing message.
-
-- [x] **Export from SDK index:** Add to `packages/sdk/src/index.ts`:
-  ```ts
-  export { createEmbedder } from "./embedder.js"
-  ```
-
-- [x] **Add `@huggingface/transformers` as an optional dependency of the SDK package.** Update `packages/sdk/package.json`:
-  ```json
-  {
-    "optionalDependencies": {
-      "@huggingface/transformers": "^3.4.0"
-    }
-  }
-  ```
-  This means `npm install memelord` will attempt to install `@huggingface/transformers` but won't fail if it can't (e.g. platform-specific ONNX issues). Consumers who explicitly need embedding can `npm install @huggingface/transformers` directly. The `memelord` plugin's `.opencode/package.json` will include it as a direct dependency since the plugin always needs it for the embed-decay flow.
-
-- [x] **Update CLI embedder to re-export from SDK:** Update `packages/cli/src/embedder.ts` to re-export from the SDK to avoid duplication:
-  ```ts
-  export { createEmbedder } from "memelord"
-  ```
-  This ensures the CLI and SDK stay in sync. The `@huggingface/transformers` dependency remains a direct (non-optional) dependency in the root `package.json` since the CLI always needs it.
-
-- [x] **Update `tsconfig.build.json`:** Ensure `packages/sdk/src/embedder.ts` is included in the build output. Check that the existing `include` pattern (`packages/sdk/src/**/*.ts`) already covers it.
+- [x] **Create `packages/embedder`** with `@huggingface/transformers` as its sole hard `dependency` and `createEmbedder` as its sole export (`packages/embedder/src/index.ts`).
+- [x] **The SDK (`memelord`) has no embedder** — `packages/sdk/src/embedder.ts` does not exist; `createEmbedder` is not exported from `packages/sdk/src/index.ts`; `packages/sdk/package.json` has no `@huggingface/transformers` dep.
+- [x] **Update CLI embedder to re-export from `memelord-embedder`:** `packages/cli/src/embedder.ts` contains `export { createEmbedder } from "memelord-embedder"`. `packages/cli/package.json` depends on `memelord-embedder: workspace:*` and no longer lists `@huggingface/transformers` directly.
+- [x] **The OpenCode plugin template imports from `memelord-embedder` directly:** Line 3 of `opencode-plugin-template.ts` is `import { createEmbedder } from "memelord-embedder"`.
+- [x] **`tsconfig.build.json` unchanged** — it only covers `packages/sdk/src/**/*.ts`, which is correct; `packages/embedder` is not compiled by the SDK build.
 
 ---
 
@@ -824,11 +757,10 @@ Insert a new numbered section after step 5 (OpenCode MCP config, line ~336) and 
   console.log("  Wrote .opencode/package.json (OpenCode plugin dependencies)")
   ```
   - **Note:** The version is read dynamically from the root `package.json` at init time so it stays in sync automatically when the package version is bumped. The `__dirname` resolution depends on the build target — if the CLI is bundled to `dist/cli.mjs`, the relative path `../../..` may need adjustment. Verify the path resolves correctly in both development (`bun run packages/cli/src/index.ts`) and production (`node dist/cli.mjs`) modes.
-  - **Note on `@huggingface/transformers`:** Since `createEmbedder` is now exported from the SDK with `@huggingface/transformers` as an **optional** dependency, and the plugin needs embedding support for the embed-decay flow, the `.opencode/package.json` should also include `@huggingface/transformers` as a direct dependency:
+  - **Note on embedding dependency:** `createEmbedder` lives in `memelord-embedder`, not the SDK. The `.opencode/package.json` must list `memelord-embedder` as a direct dependency (not `@huggingface/transformers` separately — that is a transitive dep via `memelord-embedder`):
     ```ts
-    ocPkg.dependencies["@huggingface/transformers"] = "^3.4.0"
+    ocPkg.dependencies["memelord-embedder"] = `^${memelordEmbedderVersion}`
     ```
-    This ensures the transformers package is always installed in the plugin's `node_modules`, even though it's optional at the SDK level.
 
 #### 6.3 Upgrade `@opencode-ai/plugin` to latest version
 
@@ -857,7 +789,7 @@ Insert a new numbered section after step 5 (OpenCode MCP config, line ~336) and 
   - [ ] `/tmp/test-memelord-init/.mcp.json` has `memelord` MCP server entry
   - [ ] `/tmp/test-memelord-init/opencode.json` has `memelord` MCP entry
   - [ ] `/tmp/test-memelord-init/.opencode/plugins/memelord.ts` exists and contains valid TypeScript
-  - [ ] `/tmp/test-memelord-init/.opencode/package.json` has `memelord` and `@huggingface/transformers` in dependencies, plus `@opencode-ai/plugin`
+  - [ ] `/tmp/test-memelord-init/.opencode/package.json` has `memelord`, `memelord-embedder`, and `@opencode-ai/plugin` in dependencies
   - [ ] Console output includes lines for both OpenCode MCP and OpenCode plugin
 - [ ] Clean up: `rm -rf /tmp/test-memelord-init`
 

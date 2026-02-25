@@ -1,5 +1,6 @@
 import type { Plugin } from "@opencode-ai/plugin";
-import { createMemoryStore, createEmbedder, type MemoryStore, type Memory } from "memelord";
+import { createMemoryStore, type MemoryStore, type Memory } from "memelord";
+import { createEmbedder } from "memelord-embedder";
 import { resolve, join } from "path";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, unlinkSync } from "fs";
 import { spawn } from "child_process";
