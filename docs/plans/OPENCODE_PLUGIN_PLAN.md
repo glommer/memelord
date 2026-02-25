@@ -127,9 +127,9 @@ The `generatePluginSource()` function reads this file's source, replaces `"__DAT
 
 #### 2.1 Create the plugin source file
 
-- [ ] Create new file `packages/cli/src/opencode-plugin-template.ts`
-- [ ] This is a **real TypeScript file** — not a template string generator. It contains the actual plugin source code with a placeholder for `DATA_DIR`.
-- [ ] At the bottom of the file (or in a separate file `packages/cli/src/opencode-plugin-generator.ts`), export the generator function:
+- [x] Create new file `packages/cli/src/opencode-plugin-template.ts`
+- [x] This is a **real TypeScript file** — not a template string generator. It contains the actual plugin source code with a placeholder for `DATA_DIR`.
+- [x] At the bottom of the file (or in a separate file `packages/cli/src/opencode-plugin-generator.ts`), export the generator function:
   ```ts
   export function generatePluginSource(config: { dataDir: string }): string
   ```
@@ -145,7 +145,7 @@ The `generatePluginSource()` function reads this file's source, replaces `"__DAT
 
 The file is real TypeScript with these sections in order:
 
-- [ ] **Imports block:**
+- [x] **Imports block:**
   ```ts
   import type { Plugin } from "@opencode-ai/plugin"
   import { createMemoryStore, createEmbedder, type MemoryStore, type Memory } from "memelord"
@@ -154,22 +154,22 @@ The file is real TypeScript with these sections in order:
   import { spawn } from "child_process"
   ```
 
-- [ ] **Config constant with placeholder:** `const DATA_DIR = "__DATA_DIR__"` — replaced at generation time by `generatePluginSource()` with the absolute path to the `.memelord` directory.
+- [x] **Config constant with placeholder:** `const DATA_DIR = "__DATA_DIR__"` — replaced at generation time by `generatePluginSource()` with the absolute path to the `.memelord` directory.
 
-- [ ] **Threshold constants:**
+- [x] **Threshold constants:**
   ```ts
   const DISCOVERY_TOKEN_THRESHOLD = 50_000
   const PENALIZE_TOKEN_THRESHOLD = 20_000
   const EMBED_DECAY_DELAY_MS = 5 * 60 * 1000  // 5 minutes
   ```
 
-- [ ] **Helper: `getDbPath()`** — returns `resolve(DATA_DIR, "memory.db")`
+- [x] **Helper: `getDbPath()`** — returns `resolve(DATA_DIR, "memory.db")`
 
-- [ ] **Helper: `getSessionsDir()`** — returns `join(DATA_DIR, "sessions")`, creating it with `mkdirSync({ recursive: true })` if it doesn't exist.
+- [x] **Helper: `getSessionsDir()`** — returns `join(DATA_DIR, "sessions")`, creating it with `mkdirSync({ recursive: true })` if it doesn't exist.
 
-- [ ] **Helper: `createLightStore(sessionId: string): MemoryStore`** — creates a `MemoryStore` with a dummy embed function (`async () => new Float32Array(384)`), using `getDbPath()` for `dbPath`. This is the same pattern as `packages/cli/src/hooks.ts:40-48`.
+- [x] **Helper: `createLightStore(sessionId: string): MemoryStore`** — creates a `MemoryStore` with a dummy embed function (`async () => new Float32Array(384)`), using `getDbPath()` for `dbPath`. This is the same pattern as `packages/cli/src/hooks.ts:40-48`.
 
-- [ ] **Module-level state:**
+- [x] **Module-level state:**
   ```ts
   const sessionMeta: Record<string, {
     injectedMemoryIds: string[]
@@ -180,20 +180,20 @@ The file is real TypeScript with these sections in order:
   ```
   Note: no `processedSessions` Set — we mirror CC behavior where the `Stop` hook runs fresh every turn without deduplication. The `lastEmbedDecayPid` tracks the PID of the most recently spawned embed-decay process so we can kill it before spawning a new one (see Phase 5.9).
 
-- [ ] **Plugin export:** `export const MemelordPlugin: Plugin = async ({ client, directory, worktree }) => { ... }`
+- [x] **Plugin export:** `export const MemelordPlugin: Plugin = async ({ client, directory, worktree }) => { ... }`
 
-- [ ] **Inside the plugin function, return a hooks object** with these stub handlers (implementations added in Phases 3-5):
+- [x] **Inside the plugin function, return a hooks object** with these stub handlers (implementations added in Phases 3-5):
   - `event: async ({ event }) => { /* TODO: handle session.created and session.idle */ }`
   - `"tool.execute.after": async (input, output) => { /* TODO: detect and record failures */ }`
 
 #### 2.3 Verify the template is valid TypeScript
 
 - [ ] Since the plugin template is now a real `.ts` file, verify it compiles by running `tsc --noEmit` against it (may need a temporary `tsconfig` that includes the file with the right module resolution). Alternatively, rely on the IDE's TypeScript language service to confirm no errors.
-- [ ] Write a quick smoke check: call `generatePluginSource({ dataDir: "/tmp/test-memelord" })`, write the result to a temp `.ts` file, and verify that `__DATA_DIR__` has been replaced with the actual path and the result is still valid TypeScript.
+- [x] Write a quick smoke check: call `generatePluginSource({ dataDir: "/tmp/test-memelord" })`, write the result to a temp `.ts` file, and verify that `__DATA_DIR__` has been replaced with the actual path and the result is still valid TypeScript.
 
 #### 2.4 Integrate template into `memelord init` (stub — full init update in Phase 6)
 
-- [ ] Add a JSDoc comment on `generatePluginSource` explaining:
+- [x] Add a JSDoc comment on `generatePluginSource` explaining:
   - This function is used by `memelord init` (in `packages/cli/src/index.ts`)
   - The generated file is placed at `{targetDir}/.opencode/plugins/memelord.ts`
   - The generated file depends on `memelord` being in `.opencode/package.json` dependencies
@@ -697,7 +697,7 @@ Add a new hook event handler in `packages/cli/src/hooks.ts` and register it in t
 
 The plugin imports `createEmbedder` from `memelord` (the SDK package). Currently `createEmbedder` lives in `packages/cli/src/embedder.ts`. We need to move it to the SDK. However, `@huggingface/transformers` is a heavy dependency (~22M model download) that not all SDK consumers need — e.g. the MCP server only uses the store, never the embedder. To keep the SDK lightweight, `@huggingface/transformers` is an **optional dependency** and `createEmbedder` uses a dynamic `import()` with a clear error if the package isn't installed.
 
-- [ ] **Add `createEmbedder` to the SDK package.** Create `packages/sdk/src/embedder.ts`:
+- [x] **Add `createEmbedder` to the SDK package.** Create `packages/sdk/src/embedder.ts`:
   ```ts
   import type { EmbedFn } from "./types.js"
 
@@ -747,12 +747,12 @@ The plugin imports `createEmbedder` from `memelord` (the SDK package). Currently
 
   Key difference from the CLI version: the dynamic `import("@huggingface/transformers")` is wrapped in a try/catch that throws a descriptive error if the package isn't installed, rather than letting the import error propagate with a confusing message.
 
-- [ ] **Export from SDK index:** Add to `packages/sdk/src/index.ts`:
+- [x] **Export from SDK index:** Add to `packages/sdk/src/index.ts`:
   ```ts
   export { createEmbedder } from "./embedder.js"
   ```
 
-- [ ] **Add `@huggingface/transformers` as an optional dependency of the SDK package.** Update `packages/sdk/package.json`:
+- [x] **Add `@huggingface/transformers` as an optional dependency of the SDK package.** Update `packages/sdk/package.json`:
   ```json
   {
     "optionalDependencies": {
@@ -762,13 +762,13 @@ The plugin imports `createEmbedder` from `memelord` (the SDK package). Currently
   ```
   This means `npm install memelord` will attempt to install `@huggingface/transformers` but won't fail if it can't (e.g. platform-specific ONNX issues). Consumers who explicitly need embedding can `npm install @huggingface/transformers` directly. The `memelord` plugin's `.opencode/package.json` will include it as a direct dependency since the plugin always needs it for the embed-decay flow.
 
-- [ ] **Update CLI embedder to re-export from SDK:** Update `packages/cli/src/embedder.ts` to re-export from the SDK to avoid duplication:
+- [x] **Update CLI embedder to re-export from SDK:** Update `packages/cli/src/embedder.ts` to re-export from the SDK to avoid duplication:
   ```ts
   export { createEmbedder } from "memelord"
   ```
   This ensures the CLI and SDK stay in sync. The `@huggingface/transformers` dependency remains a direct (non-optional) dependency in the root `package.json` since the CLI always needs it.
 
-- [ ] **Update `tsconfig.build.json`:** Ensure `packages/sdk/src/embedder.ts` is included in the build output. Check that the existing `include` pattern (`packages/sdk/src/**/*.ts`) already covers it.
+- [x] **Update `tsconfig.build.json`:** Ensure `packages/sdk/src/embedder.ts` is included in the build output. Check that the existing `include` pattern (`packages/sdk/src/**/*.ts`) already covers it.
 
 ---
 

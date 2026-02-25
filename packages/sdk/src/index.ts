@@ -1,4 +1,5 @@
 export { MemoryStore } from "./store.js";
+export { createEmbedder } from "./embedder.js";
 export type {
   EmbedFn,
   VectorType,

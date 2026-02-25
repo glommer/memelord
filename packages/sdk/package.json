@@ -6,5 +6,8 @@
   "types": "src/index.ts",
   "dependencies": {
     "@tursodatabase/database": "^0.4.4"
+  },
+  "optionalDependencies": {
+    "@huggingface/transformers": "^3.4.0"
   }
 }
