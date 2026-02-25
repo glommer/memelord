@@ -152,31 +152,32 @@ export type Correction = {
 export function detectCorrections(sequence: ToolSequenceEntry[]): Correction[] {
   const corrections: Correction[] = [];
 
-  for (let i = 0; i < sequence.length - 1; i++) {
-    if (!sequence[i].failed) continue;
+  for (const [i, step] of sequence.entries()) {
+    if (i >= sequence.length - 1) break;
+    if (!step.failed) continue;
 
-    for (let j = i + 1; j < Math.min(i + 4, sequence.length); j++) {
-      if (sequence[j].tool === sequence[i].tool && !sequence[j].failed) {
-        const failedInput =
-          typeof sequence[i].input === "string"
-            ? sequence[i].input
-            : JSON.stringify(sequence[i].input).slice(0, 200);
-        const succeededInput =
-          typeof sequence[j].input === "string"
-            ? sequence[j].input
-            : JSON.stringify(sequence[j].input).slice(0, 200);
+    const lookahead = sequence.slice(i + 1, i + 4);
+    for (const candidate of lookahead) {
+      if (candidate.tool !== step.tool) continue;
+      if (candidate.failed) continue;
 
-        if (failedInput !== succeededInput) {
-          corrections.push({
-            failedTool: sequence[i].tool,
-            failedInput,
-            succeededTool: sequence[j].tool,
-            succeededInput,
-          });
-        }
+      const failedInput =
+        typeof step.input === "string" ? step.input : JSON.stringify(step.input).slice(0, 200);
+      const succeededInput =
+        typeof candidate.input === "string"
+          ? candidate.input
+          : JSON.stringify(candidate.input).slice(0, 200);
 
-        break;
+      if (failedInput !== succeededInput) {
+        corrections.push({
+          failedTool: step.tool,
+          failedInput,
+          succeededTool: candidate.tool,
+          succeededInput,
+        });
       }
+
+      break;
     }
   }
 
