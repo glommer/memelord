@@ -4,7 +4,7 @@ Investigate the repository plan in `@docs/plans/OPENCODE_PLUGIN_PLAN.md`, determ
 
 ## What to do
 
-1. Read `@PLAN.md` carefully.
+1. Read `@docs/plans/OPENCODE_PLUGIN_PLAN.md` carefully.
 2. Do light repo research to understand the current state of implementation.
    - Confirm which phases/tasks are already done by inspecting the filesystem and code.
    - Prefer quick signals: existing files in `packages/sdk/src/`, `packages/cli/src/`, `scripts/`, and `test/`.
@@ -22,13 +22,13 @@ Investigate the repository plan in `@docs/plans/OPENCODE_PLUGIN_PLAN.md`, determ
 6. Commit.
    - Stage only files relevant to your work (do not sweep in unrelated working tree changes).
    - Write a commit message that references the PLAN phase/area and explains the intent.
-7. Mark off completed items in `PLAN.md`.
+7. Mark off completed items in `OPENCODE_PLUGIN_PLAN.md`.
    - Check off only the tasks you actually implemented.
-   - Include the `PLAN.md` checkbox updates in the same commit.
+   - Include the `OPENCODE_PLUGIN_PLAN.md` checkbox updates in the same commit.
 
 ## Guardrails
 
-- Do not "complete" tasks by editing `PLAN.md` checkboxes unless the implementation is actually done.
+- Do not "complete" tasks by editing `OPENCODE_PLUGIN_PLAN.md` checkboxes unless the implementation is actually done.
 - Avoid large-scale renames or drive-by refactors.
 - Do not add generated artifacts (e.g. `dist/` contents).
 - If you discover multiple possible next tasks, choose the one with the best ratio of impact to effort and lowest risk.
@@ -38,7 +38,7 @@ Investigate the repository plan in `@docs/plans/OPENCODE_PLUGIN_PLAN.md`, determ
 
 - Inspect current state:
   - `git status`
-  - read `PLAN.md`
+  - read `OPENCODE_PLUGIN_PLAN.md`
   - quick `ls`/`glob` of planned directories (`packages/cli/src/opencode/`, `packages/cli/src/claude/`, `packages/sdk/src/`, `test/opencode-plugin/`)
   - `grep` for planned function names (e.g. `generatePluginSource`, `extractToolSequencesFromOC`, `detectCorrections`, `buildDiscoverySummary`, `hookEmbedDecay`)
 - Execute one PLAN task end-to-end:
