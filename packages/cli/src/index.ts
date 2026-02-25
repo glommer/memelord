@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { startMcpServer } from "./mcp.js";
+import { generatePluginSource } from "./opencode/plugin-generator.js";
 import { resolve, join } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 
@@ -11,7 +12,7 @@ function getDbPath(): string {
 }
 
 /** Open a short-lived connection, run fn, close. */
-async function withDb<T>(fn: (db: any) => Promise<T>): T extends never ? never : Promise<T> {
+async function withDb<T>(fn: (db: any) => Promise<T>): Promise<T> {
   const { connect } = await import("@tursodatabase/database");
   const dbPath = getDbPath();
   if (!existsSync(dbPath)) {
@@ -39,6 +40,48 @@ function getCliCommand(): { command: string; args: string[] } {
   }
   // Not installed globally — use absolute path to this script
   return { command: "node", args: [resolve(execPath)] };
+}
+
+function findPackageVersionUpwardsFromFile(
+  entryFile: string,
+  wantedName: string,
+): { rootDir: string; version: string } | null {
+  if (typeof entryFile !== "string" || entryFile.length === 0) return null;
+
+  let dir = resolve(entryFile, "..");
+  for (let i = 0; i < 10; i++) {
+    const pkgPath = join(dir, "package.json");
+    if (existsSync(pkgPath)) {
+      try {
+        const parsed = JSON.parse(readFileSync(pkgPath, "utf-8"));
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          (parsed as any).name === wantedName &&
+          typeof (parsed as any).version === "string"
+        ) {
+          return { rootDir: dir, version: (parsed as any).version };
+        }
+      } catch {
+        // Ignore parse errors and keep searching.
+      }
+    }
+
+    const parent = resolve(dir, "..");
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  return null;
+}
+
+function readJsonFileIfExists(path: string): any {
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    return null;
+  }
 }
 
 function timeAgo(epochSec: number): string {
@@ -335,6 +378,37 @@ enabled = true
   writeFileSync(opencodePath, JSON.stringify(opencodeConfig, null, 2) + "\n");
   console.log("  Wrote opencode.json (OpenCode)");
 
+  // 5b. OpenCode plugin — .opencode/plugins/memelord.ts + .opencode/package.json
+  const ocDir = join(targetDir, ".opencode");
+  const ocPluginsDir = join(ocDir, "plugins");
+  if (!existsSync(ocPluginsDir)) mkdirSync(ocPluginsDir, { recursive: true });
+
+  const pluginSource = generatePluginSource({ dataDir });
+  writeFileSync(join(ocPluginsDir, "memelord.ts"), pluginSource);
+  console.log("  Wrote .opencode/plugins/memelord.ts (OpenCode plugin)");
+
+  const ocPkgPath = join(ocDir, "package.json");
+  let ocPkg: any = readJsonFileIfExists(ocPkgPath) ?? {};
+  if (!ocPkg.dependencies) ocPkg.dependencies = {};
+
+  const selfPkg = findPackageVersionUpwardsFromFile(process.argv[1] ?? "", "memelord");
+  const memelordVersion = selfPkg?.version ?? "0.1.4";
+
+  const embedderPkgPath = selfPkg?.rootDir
+    ? join(selfPkg.rootDir, "packages", "embedder", "package.json")
+    : "";
+  const embedderPkg = embedderPkgPath ? readJsonFileIfExists(embedderPkgPath) : null;
+  const embedderVersion = typeof embedderPkg?.version === "string" ? embedderPkg.version : null;
+
+  ocPkg.dependencies.memelord = `^${memelordVersion}`;
+  ocPkg.dependencies["memelord-embedder"] = embedderVersion
+    ? `^${embedderVersion}`
+    : "latest";
+  ocPkg.dependencies["@opencode-ai/plugin"] = "latest";
+
+  writeFileSync(ocPkgPath, JSON.stringify(ocPkg, null, 2) + "\n");
+  console.log("  Wrote .opencode/package.json (OpenCode plugin dependencies)");
+
   // 6. OpenClaw — config/mcporter.json
   const mcporterDir = join(targetDir, "config");
   if (!existsSync(mcporterDir)) mkdirSync(mcporterDir, { recursive: true });
@@ -399,7 +473,7 @@ enabled = true
   console.log(`memelord - Persistent memory system for coding agents
 
 Usage:
-  memelord init [dir]           Set up memelord for a project (Claude Code, Codex, OpenCode, OpenClaw)
+  memelord init [dir]           Set up memelord for a project (Claude Code, Codex, OpenCode plugin+MCP, OpenClaw)
   memelord serve                Start the MCP server (default)
   memelord hook <event>         Run a hook (session-start, post-tool-use, stop, session-end)
   memelord status               Overview: counts, categories, top memories

@@ -698,27 +698,27 @@ The init command is in `packages/cli/src/index.ts:260-396`. The OpenCode MCP con
 
 #### 6.1 Add import for the template generator
 
-- [ ] At the top of `packages/cli/src/index.ts`, add: `import { generatePluginSource } from "./opencode/plugin-generator.js"` (or `"./opencode/plugin-template.js"` depending on where the generator function lives — see Phase 2.1)
+- [x] At the top of `packages/cli/src/index.ts`, add: `import { generatePluginSource } from "./opencode/plugin-generator.js"` (or `"./opencode/plugin-template.js"` depending on where the generator function lives — see Phase 2.1)
   - Note: use `.js` extension (not `.ts`) because this is the Node-compatible import path used after compilation.
 
 #### 6.2 Add OpenCode plugin generation step to `memelord init`
 
 Insert a new numbered section after step 5 (OpenCode MCP config, line ~336) and before step 6 (OpenClaw, line ~338):
 
-- [ ] **Create the plugins directory:**
+- [x] **Create the plugins directory:**
   ```ts
   const ocPluginsDir = join(targetDir, ".opencode", "plugins")
   if (!existsSync(ocPluginsDir)) mkdirSync(ocPluginsDir, { recursive: true })
   ```
 
-- [ ] **Generate the plugin file:**
+- [x] **Generate the plugin file:**
   ```ts
   const pluginSource = generatePluginSource({ dataDir: join(targetDir, ".memelord") })
   writeFileSync(join(ocPluginsDir, "memelord.ts"), pluginSource)
   console.log("  Wrote .opencode/plugins/memelord.ts (OpenCode plugin)")
   ```
 
-- [ ] **Create or update `.opencode/package.json`:**
+- [x] **Create or update `.opencode/package.json`:**
   ```ts
   const ocPkgPath = join(targetDir, ".opencode", "package.json")
   let ocPkg: any = {}
@@ -759,7 +759,7 @@ Insert a new numbered section after step 5 (OpenCode MCP config, line ~336) and 
 
 #### 6.4 Update the help text
 
-- [ ] In the help text at `packages/cli/src/index.ts:398-420`, update the `memelord init [dir]` description line to mention the plugin:
+- [x] In the help text at `packages/cli/src/index.ts:398-420`, update the `memelord init [dir]` description line to mention the plugin:
   ```
   memelord init [dir]           Set up memelord for a project (Claude Code, Codex, OpenCode plugin+MCP, OpenClaw)
   ```
