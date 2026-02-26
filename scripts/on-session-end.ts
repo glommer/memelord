@@ -4,7 +4,7 @@
  */
 import { readStdin, getDataDir, getSessionsDir } from "./shared.ts";
 import { createMemoryStore } from "memelord";
-import { createEmbedder } from "../packages/cli/src/embedder.ts";
+import { createEmbedder } from "memelord-embedder";
 import { resolve, join } from "path";
 import { existsSync, unlinkSync } from "fs";
 

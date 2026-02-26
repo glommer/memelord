@@ -6,7 +6,7 @@
 
 The OpenCode plugin needs to create embeddings during the embed/decay workflow.
 
-`createEmbedder` originally lived in `packages/cli/src/embedder.ts`. The first revision of this ADR proposed moving it into the SDK (`memelord`) as an `optionalDependency` so the plugin could depend on the SDK without pulling in the CLI.
+`createEmbedder` was originally referenced via a small CLI wrapper at `packages/cli/src/embedder.ts`. The first revision of this ADR proposed moving it into the SDK (`memelord`) as an `optionalDependency` so the plugin could depend on the SDK without pulling in the CLI.
 
 However, using `optionalDependencies` adds complexity: the implementation needs a dynamic `import()` guard with a runtime error message, the plugin's generated `.opencode/package.json` must re-list `@huggingface/transformers` as a direct dep, and SDK consumers that never embed still see the optional dep listed. The simpler cut is a dedicated workspace package.
 
@@ -14,7 +14,7 @@ However, using `optionalDependencies` adds complexity: the implementation needs 
 
 - Create `packages/embedder` (package name: `memelord-embedder`) with `@huggingface/transformers` as its sole hard `dependency` and `createEmbedder` as its sole export.
 - Remove `createEmbedder` from the SDK (`memelord`) entirely. The SDK has no knowledge of or dependency on `@huggingface/transformers`.
-- `packages/cli/src/embedder.ts` re-exports from `memelord-embedder` (unchanged public API for CLI internals).
+- The CLI imports `createEmbedder` from `memelord-embedder` directly (the wrapper file was removed).
 - The OpenCode plugin template (`packages/cli/src/opencode/plugin-template.ts`) imports `createEmbedder` from `memelord-embedder` directly.
 - The plugin's generated `.opencode/package.json` lists `memelord-embedder` as a dependency (not `memelord` + transformers separately).
 

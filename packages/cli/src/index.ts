@@ -268,7 +268,7 @@ if (command === "hook") {
   }
 
   const { createMemoryStore } = await import("memelord");
-  const { createEmbedder } = await import("./embedder.js");
+  const { createEmbedder } = await import("memelord-embedder");
 
   const embed = await createEmbedder();
   const store = createMemoryStore({ dbPath: getDbPath(), sessionId: "cli-search", embed });

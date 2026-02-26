@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { createMemoryStore } from "memelord";
-import { createEmbedder } from "./embedder.js";
+import { createEmbedder } from "memelord-embedder";
 import { resolve } from "path";
 import { existsSync, mkdirSync } from "fs";
 import { randomUUID } from "crypto";

@@ -384,7 +384,7 @@ async function hookSessionEnd(): Promise<void> {
   if (!existsSync(dbPath)) process.exit(0);
 
   try {
-    const { createEmbedder } = await import("../embedder.js");
+    const { createEmbedder } = await import("memelord-embedder");
     const embed = await createEmbedder();
 
     const store = createMemoryStore({
@@ -427,7 +427,7 @@ async function hookEmbedDecay(sessionId: string, dataDir: string): Promise<void>
   if (!existsSync(dbPath)) process.exit(0);
 
   try {
-    const { createEmbedder } = await import("../embedder.js");
+    const { createEmbedder } = await import("memelord-embedder");
     const embed = await createEmbedder();
 
     const store = createMemoryStore({

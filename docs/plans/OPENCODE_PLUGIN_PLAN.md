@@ -356,7 +356,7 @@ The `session.idle` event handler is split into two independent concerns:
 7. Store corrections via `store.insertRawMemory(content, "correction", 1.5)` and discoveries via `store.insertRawMemory(content, "discovery", 1.0)`
 
 **From `packages/cli/src/claude/hooks.ts:376-414` (SessionEnd):**
-1. Load real embedding model via `createEmbedder()` from `packages/cli/src/embedder.ts`
+1. Load real embedding model via `createEmbedder()` from `memelord-embedder`
 2. Create a full store (with real embedder): `createMemoryStore({ dbPath, sessionId, embed })`
 3. Call `store.init()` to ensure tables exist
 4. Call `store.embedPending()` — embeds all memories that were stored without embeddings
@@ -676,7 +676,7 @@ Important: the **runner** owns latest-wins cancellation. The `embed-decay` hook 
 
 - [x] **Create `packages/embedder`** with `@huggingface/transformers` as its sole hard `dependency` and `createEmbedder` as its sole export (`packages/embedder/src/index.ts`).
 - [x] **The SDK (`memelord`) has no embedder** — `packages/sdk/src/embedder.ts` does not exist; `createEmbedder` is not exported from `packages/sdk/src/index.ts`; `packages/sdk/package.json` has no `@huggingface/transformers` dep.
-- [x] **Update CLI embedder to re-export from `memelord-embedder`:** `packages/cli/src/embedder.ts` contains `export { createEmbedder } from "memelord-embedder"`. `packages/cli/package.json` depends on `memelord-embedder: workspace:*` and no longer lists `@huggingface/transformers` directly.
+- [x] **Update CLI to import from `memelord-embedder` directly:** removed the unnecessary `packages/cli/src/embedder.ts` wrapper; CLI code imports `createEmbedder` from `memelord-embedder`.
 - [x] **The OpenCode plugin template imports from `memelord-embedder` directly:** Line 3 of `packages/cli/src/opencode/plugin-template.ts` is `import { createEmbedder } from "memelord-embedder"`.
 - [x] **`tsconfig.build.json` unchanged** — it only covers `packages/sdk/src/**/*.ts`, which is correct; `packages/embedder` is not compiled by the SDK build.
 
@@ -988,7 +988,7 @@ Edge case: if OpenCode exits between turns, there's no parent process to update 
 
 ### Why export `createEmbedder` from the SDK as an optional capability?
 
-The `createEmbedder` function was originally in `packages/cli/src/embedder.ts`. The plugin needs it but shouldn't depend on the CLI package. Moving it to the SDK (`packages/sdk/src/embedder.ts`) and re-exporting from the SDK index means:
+The `createEmbedder` function is provided by `memelord-embedder` (previously referenced via a small CLI wrapper at `packages/cli/src/embedder.ts`). The plugin needs it but shouldn't depend on the CLI package.
 - The plugin only needs `memelord` as a dependency (not `memelord-cli`)
 - The CLI re-exports from the SDK, keeping both in sync
 - The `createEmbedder` function is small (~20 lines) and has no CLI-specific dependencies
