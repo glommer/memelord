@@ -22,7 +22,7 @@ Map each CC behavior to OpenCode plugin hooks/events:
 | `SessionStart` | `event` handler for `session.created` | Inject context via `client.session.prompt({ noReply: true })`. |
 | `PostToolUse` | `tool.execute.after` | Receives `{ tool, sessionID, callID, args }` in input and `{ title, output, metadata }` in output. |
 | `Stop` | `event` handler for `session.idle` | Transcript analysis (corrections, discoveries, penalization, failure patterns). No idempotency guard — mirrors CC behavior where `Stop` runs every turn. |
-| `SessionEnd` | Detached `memelord hook embed-decay` process | Spawned from `session.idle` handler with 5-minute delay. Survives OpenCode process exit. Runs embed/decay/cleanup. |
+| `SessionEnd` | Detached `memelord hook embed-decay` process | Spawned from `session.idle` handler with 90-second delay. Survives OpenCode process exit. Runs embed/decay/cleanup. |
 
 ---
 
@@ -160,7 +160,7 @@ The file is real TypeScript with these sections in order:
   ```ts
   const DISCOVERY_TOKEN_THRESHOLD = 50_000
   const PENALIZE_TOKEN_THRESHOLD = 20_000
-  const EMBED_DECAY_DELAY_MS = 5 * 60 * 1000  // 5 minutes
+  const EMBED_DECAY_DELAY_MS = 90 * 1000  // 90 seconds
   ```
 
 - [x] **Helper: `getDbPath()`** — returns `resolve(DATA_DIR, "memory.db")`
@@ -175,10 +175,13 @@ The file is real TypeScript with these sections in order:
     injectedMemoryIds: string[]
     startedAt: number
   }> = {}
-
-  let lastEmbedDecayPid: number | null = null
   ```
-  Note: no `processedSessions` Set — we mirror CC behavior where the `Stop` hook runs fresh every turn without deduplication. The `lastEmbedDecayPid` tracks the PID of the most recently spawned embed-decay process so we can kill it before spawning a new one (see Phase 5.9).
+  Note: no `processedSessions` Set — we mirror CC behavior where the `Stop` hook runs fresh every turn without deduplication.
+
+  Embed/decay scheduling uses a **latest-wins schedule token** instead of PID killing:
+  - Each `session.idle` spawn gets a unique `scheduleId`
+  - The plugin writes the latest `scheduleId` to `{sessionsDir}/{sessionId}.embed-decay.latest`
+  - The detached `embed-decay` process exits after its delay if it is no longer the latest
 
 - [x] **Plugin export:** `export const MemelordPlugin: Plugin = async ({ client, directory, worktree }) => { ... }`
 
@@ -331,7 +334,7 @@ Inside the plugin's `"tool.execute.after"` handler:
 
 ## Phase 5: Implement Stop + SessionEnd equivalent (`session.idle` + detached embed-decay)
 
-**Goal:** When the agent finishes a turn, analyze the transcript for corrections, discoveries, and failure patterns (Stop equivalent). Separately, after a 5-minute idle delay, embed pending memories, run decay, and clean up session files (SessionEnd equivalent) in a detached process that survives OpenCode exit.
+**Goal:** When the agent finishes a turn, analyze the transcript for corrections, discoveries, and failure patterns (Stop equivalent). Separately, after a 90-second idle delay, embed pending memories, run decay, and clean up session files (SessionEnd equivalent) in a detached process that survives OpenCode exit.
 
 ### Architecture
 
@@ -339,7 +342,7 @@ The `session.idle` event handler is split into two independent concerns:
 
 1. **Transcript analysis (runs inline, every `session.idle`):** Self-correction detection, discovery detection, memory penalization, failure pattern analysis. Mirrors CC's `Stop` hook, which runs fresh every turn with no idempotency guard — accepting the risk of duplicate memories if `session.idle` fires multiple times for the same turn.
 
-2. **Embed + decay + cleanup (runs in a detached process, 5-minute delay):** Spawns `memelord hook embed-decay <sessionId> <dataDir>` as a detached child process. The child process sleeps for 5 minutes, then runs the embed/decay/cleanup work. This survives OpenCode process exit. The CLI command is a new addition to `packages/cli/src/claude/hooks.ts`.
+2. **Embed + decay + cleanup (runs in a detached process, 90-second delay):** Spawns a detached runner process (Node `-e`) that sleeps for 90 seconds, checks `{sessionsDir}/{sessionId}.embed-decay.latest`, and exits if it was superseded. If it is still the latest, it spawns `memelord hook embed-decay <sessionId> <dataDir>` with `MEMELORD_EMBED_DELAY_MS=0` so embed/decay/cleanup runs immediately. This survives OpenCode process exit.
 
 ### Behavior to replicate
 
@@ -368,7 +371,7 @@ The `session.idle` event handler is split into two independent concerns:
 3. **Token counting** — CC reads `usage.input_tokens + output_tokens + cache_creation_input_tokens` per message. OC has `AssistantMessage.tokens: { input, output, reasoning, cache: { read, write } }`. We use `input + output + cache.write`, skip `cache.read` (same principle). Also skip `reasoning` — matches CC behavior.
 4. **Text blocks** — CC extracts from `msg.content` array where `block.type === "text"`. OC extracts from `parts` where `part.type === "text"` and `part.text.length > 80`.
 5. **No idempotency guard on analysis** — CC's `Stop` hook runs fresh every turn as a separate process with no deduplication. We mirror this: transcript analysis runs on every `session.idle` event.
-6. **Deferred embed/decay** — CC runs embed/decay in `SessionEnd` (process termination). OC has no termination event, so we spawn a detached `memelord hook embed-decay` process with a 5-minute delay on each `session.idle`. The delay allows multiple turns to settle before doing the expensive embedding work.
+6. **Deferred embed/decay** — CC runs embed/decay in `SessionEnd` (process termination). OC has no termination event, so we spawn a detached `memelord hook embed-decay` process with a 90-second delay on each `session.idle`. The delay allows multiple turns to settle before doing the expensive embedding work.
 
 ### Tool name mapping
 
@@ -550,29 +553,25 @@ Inside the `event` handler, add the `session.idle` branch. This runs inline in t
 
 After Section F (closing the light store), still inside the `session.idle` handler's try block:
 
-- [x] **Kill previous embed-decay process (if any):** Before spawning a new embed-decay process, kill the previously spawned one to avoid multiple processes waking up simultaneously and competing for SQLite locks:
+- [x] **Spawn detached embed-decay process (latest-wins schedule token):**
   ```ts
-  if (lastEmbedDecayPid !== null) {
-    try {
-      process.kill(lastEmbedDecayPid)
-    } catch {
-      // Process already exited — that's fine
-    }
-    lastEmbedDecayPid = null
-  }
-  ```
-  The `lastEmbedDecayPid` variable is defined in module-level state (Phase 2.2). `process.kill()` sends `SIGTERM` by default. If the process has already exited, it throws `ESRCH` which we silently catch. This ensures only the most recent embed-decay process runs — earlier ones are cancelled before they wake up from their 5-minute sleep.
+  const scheduleId = randomUUID()
+  const tokenFile = join(getSessionsDir(), `${sessionID}.embed-decay.latest`)
 
-- [x] **Spawn detached embed-decay process:**
-  ```ts
-  const memelordBin = process.env.MEMELORD_BIN ?? "memelord"
-  const child = spawn(memelordBin, ["hook", "embed-decay", sessionID, DATA_DIR], {
+  // Spawn a detached runner that sleeps, checks the schedule token, and only then
+  // spawns `memelord hook embed-decay` with its own delay disabled.
+  const child = spawn(process.execPath, ["-e", "/* runner script */"], {
     detached: true,
     stdio: "ignore",
     env: { ...process.env },
   })
   child.unref()
-  lastEmbedDecayPid = child.pid ?? null
+
+  // Only update the schedule token if the spawn succeeded.
+  // If spawn fails, leave the previous token intact so an older scheduled process can still run.
+  if (child.pid) {
+    writeFileSync(tokenFile, scheduleId, "utf-8")
+  }
   ```
 
   The `detached: true` + `child.unref()` pattern creates a background process that:
@@ -580,44 +579,38 @@ After Section F (closing the light store), still inside the `session.idle` handl
   - Has no stdio connections to the parent
   - Runs independently until it finishes
 
-  We store `child.pid` in `lastEmbedDecayPid` so the next `session.idle` event can kill it before spawning a replacement. If the parent (OpenCode) exits before the next idle event, the detached process continues running normally — there's no one left to kill it, which is the desired behavior.
+  The schedule token file (`{sessionsDir}/{sessionId}.embed-decay.latest`) makes cancellation safe:
+  - Each idle event spawns a detached runner with a unique `scheduleId`
+  - After the delay, the runner reads the token file and exits if it is no longer the latest
+  - This avoids killing a process that might already be executing embed/decay/cleanup
 
-  The `memelord hook embed-decay` command (implemented in Phase 5.10) will:
-  1. Sleep for 5 minutes (`EMBED_DECAY_DELAY_MS`)
-  2. Load the real embedding model
-  3. Embed pending memories
-  4. Run decay
-  5. Clean up session files
-  6. Exit
+  The detached runner will:
+  1. Sleep for 90 seconds (`EMBED_DECAY_DELAY_MS`)
+  2. Exit immediately if its `scheduleId` is no longer the latest for that session
+  3. Spawn `memelord hook embed-decay <sessionId> <dataDir>` with `MEMELORD_EMBED_DELAY_MS=0`
 
-- [x] **Error handling for spawn:** Wrap the spawn call in its own try/catch. If spawning fails (e.g. `memelord` not in PATH), fall back to resolving the binary path:
-  ```ts
-  try {
-    // primary: use `memelord` from PATH
-    const child = spawn("memelord", [...], { detached: true, stdio: "ignore" })
-    child.unref()
-    lastEmbedDecayPid = child.pid ?? null
-  } catch {
-    try {
-      // fallback: use node with the CLI script path
-      const child = spawn(process.execPath, [join(DATA_DIR, "..", "node_modules", ".bin", "memelord"), ...], { detached: true, stdio: "ignore" })
-      child.unref()
-      lastEmbedDecayPid = child.pid ?? null
-    } catch (e2: any) {
-      console.error(`memelord: failed to spawn embed-decay process: ${e2.message}`)
-    }
-  }
-  ```
+  The `memelord hook embed-decay` command (implemented in Phase 5.10) will then:
+  1. Load the real embedding model
+  2. Embed pending memories
+  3. Run decay
+  4. Clean up session files
+  5. Exit
+
+- [x] **Error handling for spawn:** Best-effort and non-fatal.
+  - The plugin spawns the runner in a try/catch and swallows errors.
+  - The runner tries multiple `memelord` invocation candidates (env override, local `.opencode/node_modules/.bin/memelord`, then `memelord`) and swallows errors.
 
 #### 5.10 Add `embed-decay` subcommand to CLI
 
-Add a new hook event handler in `packages/cli/src/claude/hooks.ts` and register it in the dispatcher.
+The OpenCode embed/decay work reuses the CLI hook subcommand `memelord hook embed-decay <sessionId> <dataDir>`.
+
+Important: the **runner** owns latest-wins cancellation. The `embed-decay` hook does not read the schedule token file.
 
 - [x] **Define `hookEmbedDecay(sessionId: string, dataDir: string)` function** in `packages/cli/src/claude/hooks.ts`:
 
   ```ts
   async function hookEmbedDecay(sessionId: string, dataDir: string): Promise<void> {
-    // Sleep for 5 minutes before doing the work
+    // Sleep before doing the work
     const delayMs = parseInt(process.env.MEMELORD_EMBED_DELAY_MS ?? "300000", 10)
     await new Promise(resolve => setTimeout(resolve, delayMs))
 
@@ -657,7 +650,8 @@ Add a new hook event handler in `packages/cli/src/claude/hooks.ts` and register 
 
   Key design points:
   - Takes `sessionId` and `dataDir` as positional CLI args (not from stdin — this runs detached, not piped)
-  - Sleeps first via `setTimeout` — the delay is configurable via `MEMELORD_EMBED_DELAY_MS` env var (defaults to 300000 = 5 minutes) for testing
+  - Sleeps first via `setTimeout` — the delay is configurable via `MEMELORD_EMBED_DELAY_MS` env var
+  - The OpenCode runner invokes this with `MEMELORD_EMBED_DELAY_MS=0` to avoid double-sleeping
   - Identical embed/decay/cleanup logic as `hookSessionEnd()` in `packages/cli/src/claude/hooks.ts:376-414`
   - Session file cleanup happens here (not in the plugin's session.idle handler) because embed-decay is the final step
 
@@ -822,9 +816,10 @@ Insert a new numbered section after step 5 (OpenCode MCP config, line ~336) and 
 ### 7.6 Test: Embed + decay (deferred process)
 
 - [ ] After a session goes idle and the `session.idle` handler runs:
-  - [ ] Verify that a `memelord hook embed-decay` process was spawned (check `ps aux | grep embed-decay`)
   - [ ] To speed up testing, set `MEMELORD_EMBED_DELAY_MS=5000` (5 seconds) in the environment before starting OpenCode
-  - [ ] Wait for the embed-decay process to complete
+  - [ ] Verify that `.memelord/sessions/{sessionID}.embed-decay.latest` was written
+  - [ ] Wait ~5 seconds for the detached runner to wake and spawn `memelord hook embed-decay`
+  - [ ] Wait for embed/decay to complete
   - [ ] Check that the embedding model was loaded (look for `memelord: embedded N pending memories` in the process output or system logs)
   - [ ] Run `memelord memories` and verify that memories have embeddings (check the `emb=` field shows "OK" not "pending")
   - [ ] Check that session temp files were cleaned up: `.memelord/sessions/{sessionID}.json` and `.failures.jsonl` should be deleted
@@ -833,18 +828,17 @@ Insert a new numbered section after step 5 (OpenCode MCP config, line ~336) and 
 
 - [ ] In a session, complete one turn and let it go idle
 - [ ] Verify the analysis ran (check for console output or new memories)
-- [ ] Note the PID of the spawned embed-decay process: `ps aux | grep embed-decay`
+- [ ] Note the current schedule token: `.memelord/sessions/{sessionID}.embed-decay.latest`
 - [ ] Send another prompt in the same session, let it go idle again
 - [ ] Verify the analysis ran again on the second idle (this mirrors CC behavior)
-- [ ] Verify that the previous embed-decay process was killed (its PID should no longer appear in `ps aux`)
-- [ ] Verify that a new embed-decay process was spawned with a different PID
+- [ ] Verify the schedule token file changed (new contents)
+- [ ] (Optional) With `MEMELORD_EMBED_DELAY_MS=5000`, verify that only the latest scheduled process does work (older ones should exit quickly after waking)
 
 ### 7.8 Test: Embed-decay survives OpenCode exit
 
 - [ ] Start OpenCode, trigger some tool calls, let the session go idle
 - [ ] Immediately quit OpenCode (Ctrl+C or close)
-- [ ] Verify that the `memelord hook embed-decay` process is still running: `ps aux | grep embed-decay`
-- [ ] Wait for it to finish and verify memories were embedded
+- [ ] With `MEMELORD_EMBED_DELAY_MS=5000`, wait ~5 seconds and verify memories were embedded
 
 ### 7.9 Cleanup
 
@@ -973,21 +967,24 @@ OpenCode has no session termination event (unlike CC's `SessionEnd`). The `sessi
 2. Run on every idle event (wasteful for multi-turn sessions)
 3. Be lost if the user closes OpenCode before embedding finishes
 
-Instead, the plugin spawns `memelord hook embed-decay <sessionId> <dataDir>` as a detached child process with a 5-minute delay. This approach:
+Instead, the plugin spawns a detached runner process that sleeps for a 90-second delay and then spawns `memelord hook embed-decay <sessionId> <dataDir>` with `MEMELORD_EMBED_DELAY_MS=0` (so embed/decay runs immediately). This approach:
 - **Survives OpenCode exit** — the detached process runs independently
-- **Batches work** — the 5-minute delay lets multiple turns settle before embedding
+- **Batches work** — the 90-second delay lets multiple turns settle before embedding
 - **Doesn't block the plugin** — embedding happens in a separate process
 - **Reuses existing CLI infrastructure** — the `embed-decay` command is a thin wrapper around the same `createEmbedder`/`embedPending`/`decay` logic used by `hookSessionEnd()`
 
-The 5-minute delay is configurable via `MEMELORD_EMBED_DELAY_MS` environment variable for testing.
+The 90-second delay is configurable via `MEMELORD_EMBED_DELAY_MS` environment variable for testing.
 
-### Why kill previous embed-decay before spawning a new one?
+### Why a latest-wins schedule token for embed-decay?
 
-In a multi-turn session, each `session.idle` event spawns a detached embed-decay process with a 5-minute delay. Without intervention, multiple processes could wake up simultaneously and compete for SQLite locks, causing lock contention errors or redundant work.
+In a multi-turn session, each `session.idle` event spawns a detached runner with a delay. Without coordination, multiple runners could wake up and compete for SQLite locks, causing lock contention or redundant work.
 
-The solution is simple: track the PID of the last spawned embed-decay process in module-level state (`lastEmbedDecayPid`). Before spawning a new one, send `SIGTERM` to the previous process (silently catching `ESRCH` if it already exited). This ensures only the most recent embed-decay process runs — earlier ones are cancelled while still sleeping.
+Instead of killing by PID (which risks terminating a process mid-execution), the plugin uses a per-session **schedule token**:
+- each spawn gets a unique `scheduleId`
+- the plugin writes the latest token to `.memelord/sessions/{sessionId}.embed-decay.latest`
+- after the delay, the runner checks the token and exits if it was superseded
 
-Edge case: if OpenCode exits between turns, there's no parent process to kill the detached child. This is fine — the child will wake up after 5 minutes and do its work. The kill-previous logic only applies within a single OpenCode session where the plugin has persistent state.
+Edge case: if OpenCode exits between turns, there's no parent process to update the token file. This is fine — the last scheduled child will still wake up and do its work.
 
 ### Why export `createEmbedder` from the SDK as an optional capability?
 

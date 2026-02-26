@@ -3,6 +3,7 @@ import type { Message, Part, ToolPart, ToolState } from "@opencode-ai/sdk";
 import { createMemoryStore, type MemoryStore, type Memory } from "memelord";
 import { createEmbedder } from "memelord-embedder";
 import { resolve, join } from "path";
+import { randomUUID } from "crypto";
 import {
 	existsSync,
 	mkdirSync,
@@ -18,7 +19,7 @@ const DATA_DIR = "__DATA_DIR__";
 
 const DISCOVERY_TOKEN_THRESHOLD = 50_000;
 const PENALIZE_TOKEN_THRESHOLD = 20_000;
-const EMBED_DECAY_DELAY_MS = 5 * 60 * 1000; // 5 minutes
+const EMBED_DECAY_DELAY_MS = 90 * 1000; // 90 seconds
 
 function getDbPath(): string {
 	return resolve(DATA_DIR, "memory.db");
@@ -28,6 +29,10 @@ function getSessionsDir(): string {
 	const dir = join(DATA_DIR, "sessions");
 	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 	return dir;
+}
+
+function getEmbedDecayScheduleFile(sessionId: string): string {
+	return join(getSessionsDir(), `${sessionId}.embed-decay.latest`);
 }
 
 const dummyEmbed = async () => new Float32Array(384);
@@ -377,7 +382,6 @@ const sessionMeta: Record<
 	string,
 	{ injectedMemoryIds: string[]; startedAt: number }
 > = {};
-let lastEmbedDecayPid: number | null = null;
 
 export const MemelordPlugin: Plugin = async ({
 	client,
@@ -556,15 +560,9 @@ export const MemelordPlugin: Plugin = async ({
 							await store.close();
 						}
 
-						// --- Section F: Spawn detached embed-decay process ---
-						if (lastEmbedDecayPid !== null) {
-							try {
-								process.kill(lastEmbedDecayPid);
-							} catch {
-								// Process already exited.
-							}
-							lastEmbedDecayPid = null;
-						}
+						// --- Section F: Spawn detached embed-decay process (latest-wins schedule token) ---
+						const scheduleId = randomUUID();
+						const tokenFile = getEmbedDecayScheduleFile(sessionID);
 
 						const projectRoot = resolve(DATA_DIR, "..");
 						const localBin = join(
@@ -583,32 +581,71 @@ export const MemelordPlugin: Plugin = async ({
 							"memelord",
 						].filter((c): c is string => typeof c === "string" && c.length > 0);
 
-						const args = ["hook", "embed-decay", sessionID, DATA_DIR];
-						let spawned: number | null = null;
-						for (const cmd of candidates) {
-							try {
-								const child = spawn(cmd, args, {
-									detached: true,
-									stdio: "ignore",
-									env: { ...process.env },
-								});
-								child.on("error", () => {
-									// Swallow spawn errors to avoid crashing the plugin.
-								});
-								child.unref();
-								if (child.pid) {
-									spawned = child.pid;
-									break;
-								}
-							} catch {
-								// Try next candidate.
-							}
-						}
+						// We intentionally do NOT kill previous processes here. Instead we spawn a
+						// detached runner that sleeps, checks the latest schedule token, and only
+						// then invokes `memelord hook embed-decay` with its internal delay disabled.
+						const runnerJs =
+							"const fs=require('fs');const cp=require('child_process');" +
+							"const scheduleId=process.env.MEMELORD_EMBED_SCHEDULE_ID||'';" +
+							"const tokenFile=process.env.MEMELORD_EMBED_TOKEN_FILE||'';" +
+							"const sessionId=process.env.MEMELORD_EMBED_SESSION_ID||'';" +
+							"const dataDir=process.env.MEMELORD_EMBED_DATA_DIR||'';" +
+							"const cmd=process.env.MEMELORD_EMBED_MEMELORD_CMD||'memelord';" +
+							"const delayMs=parseInt(process.env.MEMELORD_EMBED_DELAY_MS||'" +
+							EMBED_DECAY_DELAY_MS +
+							"',10);" +
+							"const delay=(Number.isFinite(delayMs)&&delayMs>0)?delayMs:0;" +
+							"setTimeout(()=>{" +
+							"try{const latest=fs.readFileSync(tokenFile,'utf8').trim();if(latest&&latest!==scheduleId)process.exit(0);}catch{}" +
+							"try{const env=Object.assign({},process.env,{MEMELORD_EMBED_DELAY_MS:'0'});" +
+							"const child=cp.spawn(cmd,['hook','embed-decay',sessionId,dataDir],{detached:true,stdio:'ignore',env});" +
+							"child.unref();}catch{}" +
+							"process.exit(0);" +
+							"},delay);";
 
-						lastEmbedDecayPid = spawned;
-						if (spawned === null) {
+						const runnerCandidates = [process.execPath, "node"].filter(
+							(c): c is string => typeof c === "string" && c.length > 0,
+						);
+
+						let spawned: number | null = null;
+						for (const memelordCmd of candidates) {
+							for (const runnerCmd of runnerCandidates) {
+								try {
+									const child = spawn(runnerCmd, ["-e", runnerJs], {
+										detached: true,
+										stdio: "ignore",
+										env: {
+											...process.env,
+											MEMELORD_EMBED_SCHEDULE_ID: scheduleId,
+											MEMELORD_EMBED_TOKEN_FILE: tokenFile,
+											MEMELORD_EMBED_SESSION_ID: sessionID,
+											MEMELORD_EMBED_DATA_DIR: DATA_DIR,
+											MEMELORD_EMBED_MEMELORD_CMD: memelordCmd,
+										},
+									});
+									child.on("error", () => {
+										// Swallow spawn errors to avoid crashing the plugin.
+									});
+									child.unref();
+									if (child.pid) {
+										spawned = child.pid;
+										break;
+									}
+								} catch {
+									// Try next runner candidate.
+								}
+							}
+							if (spawned !== null) break;
+						}
+						if (spawned !== null) {
+							try {
+								writeFileSync(tokenFile, scheduleId, "utf-8");
+							} catch {
+								// Best-effort: if this fails, the runner can't self-cancel.
+							}
+						} else {
 							console.error(
-								"memelord: failed to spawn embed-decay process (memelord not found)",
+								"memelord: failed to spawn embed-decay runner",
 							);
 						}
 					} catch (e: any) {

@@ -19,9 +19,11 @@ We also need to ensure embedding still happens if the user closes OpenCode short
 
 On each `session.idle` event:
 
-- Spawn a detached `memelord hook embed-decay <sessionId> <dataDir>` process.
-- The child sleeps for a configurable delay (default 5 minutes) before embedding pending memories, running decay, and cleaning up session temp files.
-- Track the last spawned PID and terminate the previous sleeper process before spawning a new one.
+- Assign a unique `scheduleId` and write it to a per-session schedule file: `{dataDir}/sessions/{sessionId}.embed-decay.latest`.
+- Spawn a detached runner process (Node `-e`) that:
+  - sleeps for a configurable delay (default 90 seconds)
+  - reads the schedule file and exits without doing work if it was superseded
+  - otherwise spawns `memelord hook embed-decay <sessionId> <dataDir>` with `MEMELORD_EMBED_DELAY_MS=0` so the work runs immediately
 
 This ensures only the most recent "idle" schedules the expensive embed/decay work, reducing redundant work and avoiding concurrent SQLite access.
 
@@ -31,10 +33,11 @@ This ensures only the most recent "idle" schedules the expensive embed/decay wor
   - Survives OpenCode exit (`detached: true` + `unref()`).
   - Avoids blocking the OpenCode plugin thread.
   - Batches work across multiple turns (delay window).
-  - PID cancellation reduces redundant wakeups and mitigates SQLite lock contention.
+  - Latest-wins cancellation avoids killing a process mid-execution.
 - Cons:
   - Introduces extra processes; operational behavior must be understood during debugging.
-  - PID tracking is best-effort: if OpenCode exits, it can no longer cancel sleepers (acceptable by design).
+  - Cancellation is best-effort: if OpenCode exits, it can no longer update the schedule file (acceptable by design).
+  - If embed/decay takes a long time, a newer scheduled run may overlap with an already-running one (rare; mitigated by short-lived DB locks + retry).
   - Requires the `memelord` binary to be discoverable (PATH or configured).
 
 ## Alternatives Considered
