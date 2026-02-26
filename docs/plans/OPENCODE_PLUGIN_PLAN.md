@@ -760,15 +760,15 @@ Insert a new numbered section after step 5 (OpenCode MCP config, line ~336) and 
 
 #### 6.5 Verify init produces correct output
 
-- [ ] Run `memelord init /tmp/test-memelord-init` manually
-- [ ] Verify these files were created:
-  - [ ] `/tmp/test-memelord-init/.memelord/` directory exists
-  - [ ] `/tmp/test-memelord-init/.mcp.json` has `memelord` MCP server entry
-  - [ ] `/tmp/test-memelord-init/opencode.json` has `memelord` MCP entry
-  - [ ] `/tmp/test-memelord-init/.opencode/plugins/memelord.ts` exists and contains valid TypeScript
-  - [ ] `/tmp/test-memelord-init/.opencode/package.json` has `memelord`, `memelord-embedder`, and `@opencode-ai/plugin` in dependencies
-  - [ ] Console output includes lines for both OpenCode MCP and OpenCode plugin
-- [ ] Clean up: `rm -rf /tmp/test-memelord-init`
+- [x] Verified via automated test: `test/opencode-plugin/init.test.ts`
+- [x] Verify these files were created:
+  - [x] `/tmp/test-memelord-init/.memelord/` directory exists
+  - [x] `/tmp/test-memelord-init/.mcp.json` has `memelord` MCP server entry
+  - [x] `/tmp/test-memelord-init/opencode.json` has `memelord` MCP entry
+  - [x] `/tmp/test-memelord-init/.opencode/plugins/memelord.ts` exists and contains valid TypeScript
+  - [x] `/tmp/test-memelord-init/.opencode/package.json` has `memelord`, `memelord-embedder`, and `@opencode-ai/plugin` in dependencies
+  - [x] Console output includes lines for both OpenCode MCP and OpenCode plugin
+- [x] Clean up: done by test temp dir removal
 
 ---
 
