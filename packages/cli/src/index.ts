@@ -1,6 +1,9 @@
 #!/usr/bin/env bun
 import { startMcpServer } from "./mcp.js";
-import { generatePluginSource } from "./opencode/plugin-generator.js";
+import {
+	generatePluginSource,
+	getEmbedDecayRunnerSource,
+} from "./opencode/plugin-generator.js";
 import { resolve, join } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 
@@ -386,6 +389,15 @@ enabled = true
   const pluginSource = generatePluginSource({ dataDir });
   writeFileSync(join(ocPluginsDir, "memelord.ts"), pluginSource);
   console.log("  Wrote .opencode/plugins/memelord.ts (OpenCode plugin)");
+
+	const runnerSource = getEmbedDecayRunnerSource();
+	writeFileSync(
+		join(ocPluginsDir, "memelord.embed-decay-runner.mjs"),
+		runnerSource,
+	);
+	console.log(
+		"  Wrote .opencode/plugins/memelord.embed-decay-runner.mjs (OpenCode plugin runner)",
+	);
 
   const ocPkgPath = join(ocDir, "package.json");
   let ocPkg: any = readJsonFileIfExists(ocPkgPath) ?? {};

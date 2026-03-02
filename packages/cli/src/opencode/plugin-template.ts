@@ -568,47 +568,46 @@ export const MemelordPlugin: Plugin = async ({
 						const runnerCwd = existsSync(opencodeDir) ? opencodeDir : projectRoot;
 
 						// We intentionally do NOT kill previous processes here. Instead we spawn a
-						// detached runner that sleeps, checks the latest schedule token, and only
-						// then runs embed/decay/cleanup if it is still the latest.
-						const runnerJs =
-							"const fs=require('fs');" +
-							"const scheduleId=process.env.MEMELORD_EMBED_SCHEDULE_ID||'';" +
-							"const tokenFile=process.env.MEMELORD_EMBED_TOKEN_FILE||'';" +
-							"const sessionId=process.env.MEMELORD_EMBED_SESSION_ID||'';" +
-							"const dataDir=process.env.MEMELORD_EMBED_DATA_DIR||'';" +
-							"const delayMs=parseInt(process.env.MEMELORD_EMBED_DELAY_MS||'" +
-							EMBED_DECAY_DELAY_MS +
-							"',10);" +
-							"const delay=(Number.isFinite(delayMs)&&delayMs>0)?delayMs:0;" +
-							"setTimeout(()=>{" +
-							"try{const latest=fs.readFileSync(tokenFile,'utf8').trim();if(latest&&latest!==scheduleId)process.exit(0);}catch{}" +
-							"Promise.resolve().then(async()=>{" +
-							"const mods=await Promise.all([import('memelord'),import('memelord-embedder')]);" +
-							"const run=mods[0].runEmbedDecayMaintenance;const createEmbedder=mods[1].createEmbedder;" +
-							"if(typeof run!=='function'||typeof createEmbedder!=='function')return;" +
-							"const embed=await createEmbedder();" +
-							"await run({sessionId,dataDir,embed,cleanupSessionFiles:true});" +
-							"}).catch(()=>{}).finally(()=>process.exit(0));" +
-							"},delay);";
+						// detached runner script (a real file) that sleeps, checks the latest schedule
+						// token, and only then runs embed/decay/cleanup if it is still the latest.
+						const runnerFile = join(
+							runnerCwd,
+							"plugins",
+							"memelord.embed-decay-runner.mjs",
+						);
+						if (!existsSync(runnerFile)) {
+							console.error(
+								"memelord: embed-decay runner missing (re-run `memelord init`)\n" +
+								`expected: ${runnerFile}`,
+							);
+							return;
+						}
 
 						const runnerCandidates = [process.execPath, "node"].filter(
 							(c): c is string => typeof c === "string" && c.length > 0,
 						);
 
 						let spawned: number | null = null;
+						const env: Record<string, string> = {
+							MEMELORD_EMBED_SCHEDULE_ID: scheduleId,
+							MEMELORD_EMBED_TOKEN_FILE: tokenFile,
+							MEMELORD_EMBED_SESSION_ID: sessionID,
+							MEMELORD_EMBED_DATA_DIR: DATA_DIR,
+							MEMELORD_EMBED_DELAY_MS: String(EMBED_DECAY_DELAY_MS),
+						};
+						if (typeof process.env.PATH === "string") env.PATH = process.env.PATH;
+						if (typeof process.env.NODE_OPTIONS === "string")
+							env.NODE_OPTIONS = process.env.NODE_OPTIONS;
+						if (typeof process.env.SYSTEMROOT === "string")
+							env.SYSTEMROOT = process.env.SYSTEMROOT;
+
 						for (const runnerCmd of runnerCandidates) {
 							try {
-								const child = spawn(runnerCmd, ["-e", runnerJs], {
+								const child = spawn(runnerCmd, [runnerFile], {
 									detached: true,
 									stdio: "ignore",
 									cwd: runnerCwd,
-									env: {
-										...process.env,
-										MEMELORD_EMBED_SCHEDULE_ID: scheduleId,
-										MEMELORD_EMBED_TOKEN_FILE: tokenFile,
-										MEMELORD_EMBED_SESSION_ID: sessionID,
-										MEMELORD_EMBED_DATA_DIR: DATA_DIR,
-									},
+									env,
 								});
 								child.on("error", () => {
 									// Swallow spawn errors to avoid crashing the plugin.

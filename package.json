@@ -20,7 +20,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && bun build packages/cli/src/index.ts --target node --external @tursodatabase/database --external @modelcontextprotocol/sdk --external zod --external @huggingface/transformers --outfile dist/cli.mjs && node -e \"let f=require('fs');let c=f.readFileSync('dist/cli.mjs','utf8');f.writeFileSync('dist/cli.mjs',c.replace('#!/usr/bin/env bun','#!/usr/bin/env node'));f.copyFileSync('packages/cli/src/opencode/plugin-template.ts','dist/plugin-template.ts')\"",
+    "build": "tsc -p tsconfig.build.json && bun build packages/cli/src/index.ts --target node --external @tursodatabase/database --external @modelcontextprotocol/sdk --external zod --external @huggingface/transformers --outfile dist/cli.mjs && node -e \"let f=require('fs');let c=f.readFileSync('dist/cli.mjs','utf8');f.writeFileSync('dist/cli.mjs',c.replace('#!/usr/bin/env bun','#!/usr/bin/env node'));f.copyFileSync('packages/cli/src/opencode/plugin-template.ts','dist/plugin-template.ts');f.copyFileSync('packages/cli/src/opencode/embed-decay-runner.mjs','dist/embed-decay-runner.mjs')\"",
     "test": "bun test test/",
     "prepublishOnly": "bun run build"
   },

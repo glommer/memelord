@@ -20,13 +20,24 @@ function decode(out: Uint8Array | ArrayBuffer | string): string {
 }
 
 describe("memelord init (OpenCode plugin outputs)", () => {
-		test("writes OpenCode plugin + config files", () => {
+			test("writes OpenCode plugin + config files", () => {
 			const dir = mkdtempSync(join(tmpdir(), "memelord-init-"));
 			const templateDest = resolve(process.cwd(), "dist", "plugin-template.ts");
+			const runnerDest = resolve(process.cwd(), "dist", "embed-decay-runner.mjs");
 			let createdDistTemplate = false;
+			let createdDistRunner = false;
 			try {
 				const cliPath = resolve(process.cwd(), "dist", "cli.mjs");
-				if (!existsSync(cliPath)) {
+				const cliNeedsRebuild = () => {
+					if (!existsSync(cliPath)) return true;
+					try {
+						const c = readFileSync(cliPath, "utf-8");
+						return !c.includes("memelord.embed-decay-runner.mjs");
+					} catch {
+						return true;
+					}
+				};
+				if (cliNeedsRebuild()) {
 					const build = Bun.spawnSync({
 						cmd: [process.execPath, "run", "build"],
 						stdout: "pipe",
@@ -53,6 +64,22 @@ describe("memelord init (OpenCode plugin outputs)", () => {
 					createdDistTemplate = true;
 				}
 
+				// `dist/cli.mjs` also reads the detached embed/decay runner from dist.
+				if (!existsSync(runnerDest)) {
+					copyFileSync(
+						resolve(
+							process.cwd(),
+							"packages",
+							"cli",
+							"src",
+							"opencode",
+							"embed-decay-runner.mjs",
+						),
+						runnerDest,
+					);
+					createdDistRunner = true;
+				}
+
 			const result = Bun.spawnSync({
 				cmd: ["node", cliPath, "init", dir],
 				stdout: "pipe",
@@ -63,12 +90,15 @@ describe("memelord init (OpenCode plugin outputs)", () => {
 
 			const stdout = decode(result.stdout);
 			expect(stdout).toContain("Wrote opencode.json (OpenCode)");
-			expect(stdout).toContain(
-				"Wrote .opencode/plugins/memelord.ts (OpenCode plugin)",
-			);
-			expect(stdout).toContain(
-				"Wrote .opencode/package.json (OpenCode plugin dependencies)",
-			);
+				expect(stdout).toContain(
+					"Wrote .opencode/plugins/memelord.ts (OpenCode plugin)",
+				);
+				expect(stdout).toContain(
+					"Wrote .opencode/plugins/memelord.embed-decay-runner.mjs (OpenCode plugin runner)",
+				);
+				expect(stdout).toContain(
+					"Wrote .opencode/package.json (OpenCode plugin dependencies)",
+				);
 
 			// Phase 6.5 checklist items
 			expect(existsSync(join(dir, ".memelord"))).toBe(true);
@@ -87,9 +117,16 @@ describe("memelord init (OpenCode plugin outputs)", () => {
 				join(dir, ".memelord"),
 			);
 
-			const pluginPath = join(dir, ".opencode", "plugins", "memelord.ts");
-			expect(existsSync(pluginPath)).toBe(true);
-			const pluginSource = readFileSync(pluginPath, "utf-8");
+				const pluginPath = join(dir, ".opencode", "plugins", "memelord.ts");
+				expect(existsSync(pluginPath)).toBe(true);
+				const runnerPath = join(
+					dir,
+					".opencode",
+					"plugins",
+					"memelord.embed-decay-runner.mjs",
+				);
+				expect(existsSync(runnerPath)).toBe(true);
+				const pluginSource = readFileSync(pluginPath, "utf-8");
 			expect(pluginSource.includes("__DATA_DIR__")).toBe(false);
 			expect(pluginSource).toContain(
 				`const DATA_DIR = ${JSON.stringify(join(dir, ".memelord"))}`,
@@ -114,6 +151,9 @@ describe("memelord init (OpenCode plugin outputs)", () => {
 				rmSync(dir, { recursive: true, force: true });
 				if (createdDistTemplate && existsSync(templateDest)) {
 					unlinkSync(templateDest);
+				}
+				if (createdDistRunner && existsSync(runnerDest)) {
+					unlinkSync(runnerDest);
 				}
 			}
 		});
