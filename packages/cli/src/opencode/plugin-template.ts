@@ -1,7 +1,6 @@
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import type { Message, Part, ToolPart, ToolState } from "@opencode-ai/sdk";
 import { createMemoryStore, type MemoryStore, type Memory } from "memelord";
-import { createEmbedder } from "memelord-embedder";
 import { resolve, join } from "path";
 import { randomUUID } from "crypto";
 import {
@@ -560,47 +559,36 @@ export const MemelordPlugin: Plugin = async ({
 							await store.close();
 						}
 
-						// --- Section F: Spawn detached embed-decay process (latest-wins schedule token) ---
+					// --- Section F: Spawn detached embed-decay process (latest-wins schedule token) ---
 						const scheduleId = randomUUID();
 						const tokenFile = getEmbedDecayScheduleFile(sessionID);
 
 						const projectRoot = resolve(DATA_DIR, "..");
-						const localBin = join(
-							projectRoot,
-							".opencode",
-							"node_modules",
-							".bin",
-							"memelord",
-						);
-						const candidates = [
-							typeof process.env.MEMELORD_BIN === "string" &&
-							process.env.MEMELORD_BIN.length > 0
-								? process.env.MEMELORD_BIN
-								: null,
-							existsSync(localBin) ? localBin : null,
-							"memelord",
-						].filter((c): c is string => typeof c === "string" && c.length > 0);
+						const opencodeDir = join(projectRoot, ".opencode");
+						const runnerCwd = existsSync(opencodeDir) ? opencodeDir : projectRoot;
 
 						// We intentionally do NOT kill previous processes here. Instead we spawn a
 						// detached runner that sleeps, checks the latest schedule token, and only
-						// then invokes `memelord hook embed-decay` with its internal delay disabled.
+						// then runs embed/decay/cleanup if it is still the latest.
 						const runnerJs =
-							"const fs=require('fs');const cp=require('child_process');" +
+							"const fs=require('fs');" +
 							"const scheduleId=process.env.MEMELORD_EMBED_SCHEDULE_ID||'';" +
 							"const tokenFile=process.env.MEMELORD_EMBED_TOKEN_FILE||'';" +
 							"const sessionId=process.env.MEMELORD_EMBED_SESSION_ID||'';" +
 							"const dataDir=process.env.MEMELORD_EMBED_DATA_DIR||'';" +
-							"const cmd=process.env.MEMELORD_EMBED_MEMELORD_CMD||'memelord';" +
 							"const delayMs=parseInt(process.env.MEMELORD_EMBED_DELAY_MS||'" +
 							EMBED_DECAY_DELAY_MS +
 							"',10);" +
 							"const delay=(Number.isFinite(delayMs)&&delayMs>0)?delayMs:0;" +
 							"setTimeout(()=>{" +
 							"try{const latest=fs.readFileSync(tokenFile,'utf8').trim();if(latest&&latest!==scheduleId)process.exit(0);}catch{}" +
-							"try{const env=Object.assign({},process.env,{MEMELORD_EMBED_DELAY_MS:'0'});" +
-							"const child=cp.spawn(cmd,['hook','embed-decay',sessionId,dataDir],{detached:true,stdio:'ignore',env});" +
-							"child.unref();}catch{}" +
-							"process.exit(0);" +
+							"Promise.resolve().then(async()=>{" +
+							"const mods=await Promise.all([import('memelord'),import('memelord-embedder')]);" +
+							"const run=mods[0].runEmbedDecayMaintenance;const createEmbedder=mods[1].createEmbedder;" +
+							"if(typeof run!=='function'||typeof createEmbedder!=='function')return;" +
+							"const embed=await createEmbedder();" +
+							"await run({sessionId,dataDir,embed,cleanupSessionFiles:true});" +
+							"}).catch(()=>{}).finally(()=>process.exit(0));" +
 							"},delay);";
 
 						const runnerCandidates = [process.execPath, "node"].filter(
@@ -608,34 +596,31 @@ export const MemelordPlugin: Plugin = async ({
 						);
 
 						let spawned: number | null = null;
-						for (const memelordCmd of candidates) {
-							for (const runnerCmd of runnerCandidates) {
-								try {
-									const child = spawn(runnerCmd, ["-e", runnerJs], {
-										detached: true,
-										stdio: "ignore",
-										env: {
-											...process.env,
-											MEMELORD_EMBED_SCHEDULE_ID: scheduleId,
-											MEMELORD_EMBED_TOKEN_FILE: tokenFile,
-											MEMELORD_EMBED_SESSION_ID: sessionID,
-											MEMELORD_EMBED_DATA_DIR: DATA_DIR,
-											MEMELORD_EMBED_MEMELORD_CMD: memelordCmd,
-										},
-									});
-									child.on("error", () => {
-										// Swallow spawn errors to avoid crashing the plugin.
-									});
-									child.unref();
-									if (child.pid) {
-										spawned = child.pid;
-										break;
-									}
-								} catch {
-									// Try next runner candidate.
+						for (const runnerCmd of runnerCandidates) {
+							try {
+								const child = spawn(runnerCmd, ["-e", runnerJs], {
+									detached: true,
+									stdio: "ignore",
+									cwd: runnerCwd,
+									env: {
+										...process.env,
+										MEMELORD_EMBED_SCHEDULE_ID: scheduleId,
+										MEMELORD_EMBED_TOKEN_FILE: tokenFile,
+										MEMELORD_EMBED_SESSION_ID: sessionID,
+										MEMELORD_EMBED_DATA_DIR: DATA_DIR,
+									},
+								});
+								child.on("error", () => {
+									// Swallow spawn errors to avoid crashing the plugin.
+								});
+								child.unref();
+								if (child.pid) {
+									spawned = child.pid;
+									break;
 								}
+							} catch {
+								// Try next runner candidate.
 							}
-							if (spawned !== null) break;
 						}
 						if (spawned !== null) {
 							try {

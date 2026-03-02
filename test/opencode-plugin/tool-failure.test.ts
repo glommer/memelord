@@ -6,7 +6,7 @@ import {
   findToolPartByCallID,
   formatFailureEntryFromSummary,
   getOpenCodeToolFailureSummaryFromState,
-} from "../packages/cli/src/opencode/plugin-template";
+} from "../../packages/cli/src/opencode/plugin-template";
 
 describe("OpenCode failure detection", () => {
   test("prefers ToolState.status for failure checks", () => {

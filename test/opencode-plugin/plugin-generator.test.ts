@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import ts from "typescript";
-import { generatePluginSource } from "../packages/cli/src/opencode/plugin-generator";
+import { generatePluginSource } from "../../packages/cli/src/opencode/plugin-generator";
 
 describe("generatePluginSource", () => {
   test("replaces DATA_DIR placeholder and returns valid TypeScript", () => {

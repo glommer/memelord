@@ -380,29 +380,7 @@ async function hookSessionEnd(): Promise<void> {
 
   if (!existsSync(join(cwd, ".memelord"))) process.exit(0);
 
-  const dbPath = getDbPath(cwd);
-  if (!existsSync(dbPath)) process.exit(0);
-
   try {
-    const { createEmbedder } = await import("memelord-embedder");
-    const embed = await createEmbedder();
-
-    const store = createMemoryStore({
-      dbPath,
-      sessionId,
-      embed,
-    });
-
-    await store.init();
-    const embedded = await store.embedPending();
-    if (embedded > 0) console.error(`memelord: embedded ${embedded} pending memories`);
-
-    const decayResult = await store.decay();
-    if (decayResult.deleted > 0) console.error(`memelord: cleaned up ${decayResult.deleted} stale memories`);
-
-    await store.close();
-
-    // Clean up session files
     const sessionsDir = getSessionsDir(cwd);
     const sessionFile = join(sessionsDir, `${sessionId}.json`);
     const failuresFile = join(sessionsDir, `${sessionId}.failures.jsonl`);
@@ -410,49 +388,6 @@ async function hookSessionEnd(): Promise<void> {
     if (existsSync(failuresFile)) unlinkSync(failuresFile);
   } catch (e: any) {
     console.error(`memelord SessionEnd error: ${e.message}`);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Embed-decay (detached from OpenCode plugin)
-// ---------------------------------------------------------------------------
-
-async function hookEmbedDecay(sessionId: string, dataDir: string): Promise<void> {
-  const delayMs = parseInt(process.env.MEMELORD_EMBED_DELAY_MS ?? "300000", 10);
-  if (Number.isFinite(delayMs) && delayMs > 0) {
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-
-  const dbPath = resolve(dataDir, "memory.db");
-  if (!existsSync(dbPath)) process.exit(0);
-
-  try {
-    const { createEmbedder } = await import("memelord-embedder");
-    const embed = await createEmbedder();
-
-    const store = createMemoryStore({
-      dbPath,
-      sessionId,
-      embed,
-    });
-
-    await store.init();
-    const embedded = await store.embedPending();
-    if (embedded > 0) console.error(`memelord: embedded ${embedded} pending memories`);
-
-    const decayResult = await store.decay();
-    if (decayResult.deleted > 0) console.error(`memelord: cleaned up ${decayResult.deleted} stale memories`);
-
-    await store.close();
-
-    // Clean up session files
-    const sessionsDir = join(dataDir, "sessions");
-    const sessionFile = join(sessionsDir, `${sessionId}.json`);
-    const failuresFile = join(sessionsDir, `${sessionId}.failures.jsonl`);
-    if (existsSync(sessionFile)) unlinkSync(sessionFile);
-    if (existsSync(failuresFile)) unlinkSync(failuresFile);
-  } catch (e: any) {
-    console.error(`memelord embed-decay error: ${e.message}`);
   }
 }
 
@@ -466,16 +401,6 @@ export async function runHook(event: string): Promise<void> {
     case "post-tool-use": return hookPostToolUse();
     case "stop": return hookStop();
     case "session-end": return hookSessionEnd();
-    case "embed-decay": {
-      // Usage: memelord hook embed-decay <sessionId> <dataDir>
-      const sessionId = process.argv[4];
-      const dataDir = process.argv[5];
-      if (!sessionId || !dataDir) {
-        console.error("Usage: memelord hook embed-decay <sessionId> <dataDir>");
-        process.exit(1);
-      }
-      return hookEmbedDecay(sessionId, dataDir);
-    }
     default:
       console.error(`Unknown hook event: ${event}`);
       process.exit(1);

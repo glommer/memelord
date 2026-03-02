@@ -1,4 +1,5 @@
 export { MemoryStore } from "./store.js";
+export { runEmbedDecayMaintenance } from "./maintenance.js";
 export type {
   EmbedFn,
   VectorType,
