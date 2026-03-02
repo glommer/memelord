@@ -380,6 +380,38 @@ async function hookSessionEnd(): Promise<void> {
 
   if (!existsSync(join(cwd, ".memelord"))) process.exit(0);
 
+  const dataDir = getDataDir(cwd);
+  const dbPath = getDbPath(cwd);
+
+  if (existsSync(dbPath)) {
+    try {
+      // Run embed/decay using the real embedder. This keeps vector search useful
+      // across sessions even though the hooks themselves use a dummy embed fn.
+      const { runEmbedDecayMaintenance } = await import("memelord");
+      const { createEmbedder } = await import("memelord-embedder");
+
+      const embed = await createEmbedder();
+      const result = await runEmbedDecayMaintenance({
+        sessionId,
+        dataDir,
+        embed,
+        cleanupSessionFiles: false,
+      });
+
+      if (result.embedded > 0) {
+        console.error(`memelord: embedded ${result.embedded} pending memories`);
+      }
+      if (result.decay.deleted > 0) {
+        console.error(
+          `memelord: cleaned up ${result.decay.deleted} stale memories`,
+        );
+      }
+    } catch (e: any) {
+      console.error(`memelord SessionEnd error: ${e.message}`);
+    }
+  }
+
+  // Always clean up session files, even if embed/decay fails.
   try {
     const sessionsDir = getSessionsDir(cwd);
     const sessionFile = join(sessionsDir, `${sessionId}.json`);
@@ -387,7 +419,7 @@ async function hookSessionEnd(): Promise<void> {
     if (existsSync(sessionFile)) unlinkSync(sessionFile);
     if (existsSync(failuresFile)) unlinkSync(failuresFile);
   } catch (e: any) {
-    console.error(`memelord SessionEnd error: ${e.message}`);
+    console.error(`memelord SessionEnd cleanup error: ${e.message}`);
   }
 }
 
