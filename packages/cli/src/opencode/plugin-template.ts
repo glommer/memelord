@@ -382,12 +382,49 @@ const sessionMeta: Record<
 	{ injectedMemoryIds: string[]; startedAt: number }
 > = {};
 
+// Tracks the last time we observed the user continuing a session via prompt/command.
+// Used to avoid scheduling embed/decay if the session becomes active again while
+// we're still processing a `session.idle` event.
+const sessionLastActivityMs: Record<string, number> = {};
+
+function cancelEmbedDecaySchedule(sessionId: string): void {
+	if (typeof sessionId !== "string" || sessionId.length === 0) return;
+
+	// Invalidate any pending detached runner by updating the latest-wins token.
+	// We do NOT attempt to kill processes; the runner exits when token != scheduleId.
+	const tokenFile = getEmbedDecayScheduleFile(sessionId);
+	try {
+		writeFileSync(tokenFile, randomUUID(), "utf-8");
+	} catch {
+		// Best-effort: if we can't write the token, we can't cancel pending runners.
+	}
+}
+
+function markSessionActive(sessionId: string): void {
+	sessionLastActivityMs[sessionId] = Date.now();
+	cancelEmbedDecaySchedule(sessionId);
+}
+
+function extractSessionIdFromHook(input: any, output: any): string | null {
+	const candidates = [
+		input?.sessionID,
+		input?.sessionId,
+		input?.path?.id,
+		output?.sessionID,
+		output?.message?.sessionID,
+	];
+	for (const c of candidates) {
+		if (typeof c === "string" && c.length > 0) return c;
+	}
+	return null;
+}
+
 export const MemelordPlugin: Plugin = async ({
 	client,
 	directory,
 	worktree,
 }: PluginInput) => {
-	return {
+	const hooks: any = {
 		event: async ({ event }: any) => {
 			void directory;
 			void worktree;
@@ -441,6 +478,8 @@ export const MemelordPlugin: Plugin = async ({
 					return;
 				}
 				case "session.idle": {
+					const idleStartedAtMs = Date.now();
+
 					const sessionID = (event.properties as any)?.sessionID;
 					if (typeof sessionID !== "string" || sessionID.length === 0) return;
 					if (!existsSync(getDbPath())) return;
@@ -559,7 +598,11 @@ export const MemelordPlugin: Plugin = async ({
 							await store.close();
 						}
 
-					// --- Section F: Spawn detached embed-decay process (latest-wins schedule token) ---
+						// If the user resumed the session while we were processing `session.idle`,
+						// do not schedule embed/decay.
+						if ((sessionLastActivityMs[sessionID] ?? 0) > idleStartedAtMs) return;
+
+						// --- Section F: Spawn detached embed-decay process (latest-wins schedule token) ---
 						const scheduleId = randomUUID();
 						const tokenFile = getEmbedDecayScheduleFile(sessionID);
 
@@ -623,6 +666,10 @@ export const MemelordPlugin: Plugin = async ({
 						}
 						if (spawned !== null) {
 							try {
+								// If the session resumed while we were scheduling, don't clobber a
+								// cancellation token written by the prompt/command hooks.
+								if ((sessionLastActivityMs[sessionID] ?? 0) > idleStartedAtMs) return;
+
 								writeFileSync(tokenFile, scheduleId, "utf-8");
 							} catch {
 								// Best-effort: if this fails, the runner can't self-cancel.
@@ -680,4 +727,58 @@ export const MemelordPlugin: Plugin = async ({
 			}
 		},
 	};
+
+	// --- Cancellation hooks ---
+	// If the user continues the session (prompt/command), cancel any pending
+	// embed/decay runner. Embed/decay should only run when we have a best guess
+	// the session is truly over.
+	//
+	// Note: These hook names are used by OpenCode. We keep the handler signatures
+	// `any`-typed so the generated plugin stays compatible across versions.
+	hooks["session.prompt"] = async (input: any, output: any) => {
+		try {
+			// Ignore internal context injections (noReply prompts).
+			if (input?.body?.noReply === true) return;
+			const sessionID = extractSessionIdFromHook(input, output);
+			if (!sessionID) return;
+			markSessionActive(sessionID);
+		} catch {
+			// Swallow hook errors.
+		}
+	};
+
+	hooks["session.promptAsync"] = async (input: any, output: any) => {
+		try {
+			if (input?.body?.noReply === true) return;
+			const sessionID = extractSessionIdFromHook(input, output);
+			if (!sessionID) return;
+			markSessionActive(sessionID);
+		} catch {
+			// Swallow hook errors.
+		}
+	};
+
+	hooks["session.command"] = async (input: any, output: any) => {
+		try {
+			const sessionID = extractSessionIdFromHook(input, output);
+			if (!sessionID) return;
+			markSessionActive(sessionID);
+		} catch {
+			// Swallow hook errors.
+		}
+	};
+
+	// Backstop for command-driven session continuation.
+	hooks["command.execute.before"] = async (input: any, output: any) => {
+		try {
+			void output;
+			const sessionID = extractSessionIdFromHook(input, output);
+			if (!sessionID) return;
+			markSessionActive(sessionID);
+		} catch {
+			// Swallow hook errors.
+		}
+	};
+
+	return hooks;
 };
