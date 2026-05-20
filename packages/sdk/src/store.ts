@@ -109,7 +109,9 @@ export class MemoryStore {
     let db: Database;
     for (let attempt = 0; ; attempt++) {
       try {
-        db = await connect(this.dbPath);
+        db = await connect(this.dbPath, {
+          experimental: ["multiprocess_wal"]
+        });
         break;
       } catch (e: any) {
         if (attempt >= maxRetries || !e.message?.includes("locked") && !e.message?.includes("Locking")) {
@@ -133,14 +135,12 @@ export class MemoryStore {
     await this.withDb(async (db) => {
       await db.exec(SCHEMA);
       // One-time migration: detect embeddings truncated by Float32Array driver bug
-      const result = await db.prepare(
-        "UPDATE memories SET embedding = NULL WHERE embedding IS NOT NULL AND length(embedding) < 1536"
-      ).run();
+      const result = await (await db.prepare("UPDATE memories SET embedding = NULL WHERE embedding IS NOT NULL AND length(embedding) < 1536")).run();
       if (result.changes > 0) {
         console.error(`[memelord] Fixed ${result.changes} truncated embeddings (will re-embed on next startTask)`);
       }
       // Load baseline
-      const row = await db.prepare("SELECT value FROM meta WHERE key = 'baseline'").get() as { value: string } | undefined;
+      const row = await (await db.prepare("SELECT value FROM meta WHERE key = 'baseline'")).get() as { value: string } | undefined;
       if (row) {
         this.baseline = JSON.parse(row.value);
       }
@@ -170,15 +170,13 @@ export class MemoryStore {
 
     const memories = await this.withDb(async (db) => {
       // Insert task record
-      await db.prepare(
-        "INSERT INTO tasks (id, description, embedding, started_at) VALUES (?, ?, ?, ?)"
-      ).run(taskId, description, vecBuf(taskEmbedding), now);
+      await (await db.prepare("INSERT INTO tasks (id, description, embedding, started_at) VALUES (?, ?, ?, ?)")).run(taskId, description, vecBuf(taskEmbedding), now);
 
       // Retrieve top-k memories by relevance (similarity * recency).
       // Weight is intentionally excluded: it captures historical usefulness
       // across all tasks, which is orthogonal to relevance for THIS task.
       const vfn = this.vfn;
-      const rows = await db.prepare(`
+      const rows = await (await db.prepare(`
         SELECT
           id, content, category, weight, created_at, retrieval_count,
           vector_distance_cos(${vfn}(embedding), ${vfn}(?)) AS distance
@@ -189,7 +187,7 @@ export class MemoryStore {
           * POWER(?, (CAST(? AS REAL) - COALESCE(last_retrieved, created_at)) / 86400.0)
         DESC
         LIMIT ?
-      `).all(vecBuf(taskEmbedding), vecBuf(taskEmbedding), this.decayRate, now, this.topK) as any[];
+      `)).all(vecBuf(taskEmbedding), vecBuf(taskEmbedding), this.decayRate, now, this.topK) as any[];
 
       const mems: Memory[] = rows.map((r: any) => ({
         id: r.id,
@@ -203,13 +201,9 @@ export class MemoryStore {
 
       // Record retrievals
       for (const mem of mems) {
-        await db.prepare(
-          "INSERT OR IGNORE INTO memory_retrievals (memory_id, task_id, similarity) VALUES (?, ?, ?)"
-        ).run(mem.id, taskId, mem.score);
+        await (await db.prepare("INSERT OR IGNORE INTO memory_retrievals (memory_id, task_id, similarity) VALUES (?, ?, ?)")).run(mem.id, taskId, mem.score);
 
-        await db.prepare(
-          "UPDATE memories SET last_retrieved = ?, retrieval_count = retrieval_count + 1 WHERE id = ?"
-        ).run(now, mem.id);
+        await (await db.prepare("UPDATE memories SET last_retrieved = ?, retrieval_count = retrieval_count + 1 WHERE id = ?")).run(now, mem.id);
       }
 
       return mems;
@@ -229,16 +223,12 @@ export class MemoryStore {
     const embedding = await this.embed(content);
 
     await this.withDb(async (db) => {
-      const avgRow = await db.prepare(
-        "SELECT AVG(tokens_used) as avg FROM tasks WHERE tokens_used IS NOT NULL"
-      ).get() as { avg: number | null } | undefined;
+      const avgRow = await (await db.prepare("SELECT AVG(tokens_used) as avg FROM tasks WHERE tokens_used IS NOT NULL")).get() as { avg: number | null } | undefined;
       const avgTokens = avgRow?.avg ?? 10000;
 
       const weight = initialWeight("correction", undefined, input.tokensWasted, avgTokens);
 
-      await db.prepare(
-        "INSERT INTO memories (id, content, embedding, category, weight, initial_cost, created_at, source_task) VALUES (?, ?, ?, 'correction', ?, ?, ?, ?)"
-      ).run(id, content, vecBuf(embedding), weight, input.tokensWasted ?? 0, now, this.currentTaskId);
+      await (await db.prepare("INSERT INTO memories (id, content, embedding, category, weight, initial_cost, created_at, source_task) VALUES (?, ?, ?, 'correction', ?, ?, ?, ?)")).run(id, content, vecBuf(embedding), weight, input.tokensWasted ?? 0, now, this.currentTaskId);
     });
 
     return id;
@@ -254,9 +244,7 @@ export class MemoryStore {
     const weight = initialWeight("user", input.source);
 
     await this.withDb(async (db) => {
-      await db.prepare(
-        "INSERT INTO memories (id, content, embedding, category, weight, created_at, source_task) VALUES (?, ?, ?, 'user', ?, ?, ?)"
-      ).run(id, input.lesson, vecBuf(embedding), weight, now, this.currentTaskId);
+      await (await db.prepare("INSERT INTO memories (id, content, embedding, category, weight, created_at, source_task) VALUES (?, ?, ?, 'user', ?, ?, ?)")).run(id, input.lesson, vecBuf(embedding), weight, now, this.currentTaskId);
     });
 
     return id;
@@ -277,21 +265,19 @@ export class MemoryStore {
     this.baseline = updateBaseline(this.baseline, input.tokensUsed, input.errors, input.userCorrections);
 
     await this.withDb(async (db) => {
-      await db.prepare(`
+      await (await db.prepare(`
         UPDATE tasks SET
           tokens_used = ?, tool_calls = ?, errors = ?,
           user_corrections = ?, completed = ?, task_score = ?, finished_at = ?
         WHERE id = ?
-      `).run(
+      `)).run(
         input.tokensUsed, input.toolCalls, input.errors,
         input.userCorrections, input.completed ? 1 : 0, taskScore, now,
         taskId,
       );
 
       // Save baseline
-      await db.prepare(
-        "INSERT INTO meta (key, value) VALUES ('baseline', ?) ON CONFLICT(key) DO UPDATE SET value = ?"
-      ).run(JSON.stringify(this.baseline), JSON.stringify(this.baseline));
+      await (await db.prepare("INSERT INTO meta (key, value) VALUES ('baseline', ?) ON CONFLICT(key) DO UPDATE SET value = ?")).run(JSON.stringify(this.baseline), JSON.stringify(this.baseline));
 
       // Process self-report: update weights for retrieved memories
       if (input.selfReport && input.selfReport.length > 0) {
@@ -300,18 +286,14 @@ export class MemoryStore {
         for (const entry of input.selfReport) {
           const credit = computeCredit(taskScore, entry.score, numRetrieved);
 
-          const memRow = await db.prepare(
-            "SELECT weight FROM memories WHERE id = ?"
-          ).get(entry.memoryId) as { weight: number } | undefined;
+          const memRow = await (await db.prepare("SELECT weight FROM memories WHERE id = ?")).get(entry.memoryId) as { weight: number } | undefined;
 
           if (memRow) {
             const newWeight = updateWeight(memRow.weight, credit, this.learningRate);
-            await db.prepare("UPDATE memories SET weight = ? WHERE id = ?").run(newWeight, entry.memoryId);
+            await (await db.prepare("UPDATE memories SET weight = ? WHERE id = ?")).run(newWeight, entry.memoryId);
           }
 
-          await db.prepare(
-            "UPDATE memory_retrievals SET self_report = ?, credit = ? WHERE memory_id = ? AND task_id = ?"
-          ).run(entry.score, credit, entry.memoryId, taskId);
+          await (await db.prepare("UPDATE memory_retrievals SET self_report = ?, credit = ? WHERE memory_id = ? AND task_id = ?")).run(entry.score, credit, entry.memoryId, taskId);
         }
       }
     });
@@ -328,13 +310,9 @@ export class MemoryStore {
   async decay(): Promise<DecayResult> {
     await this.init();
     return this.withDb(async (db) => {
-      const decayResult = await db.prepare(
-        "UPDATE memories SET weight = weight * ?"
-      ).run(this.decayRate);
+      const decayResult = await (await db.prepare("UPDATE memories SET weight = weight * ?")).run(this.decayRate);
 
-      const deleteResult = await db.prepare(
-        "DELETE FROM memories WHERE weight < 0.15 AND retrieval_count > 5"
-      ).run();
+      const deleteResult = await (await db.prepare("DELETE FROM memories WHERE weight < 0.15 AND retrieval_count > 5")).run();
 
       return {
         decayed: decayResult.changes,
@@ -346,9 +324,7 @@ export class MemoryStore {
   async purge(threshold: number): Promise<number> {
     await this.init();
     return this.withDb(async (db) => {
-      const result = await db.prepare(
-        "DELETE FROM memories WHERE weight < ?"
-      ).run(threshold);
+      const result = await (await db.prepare("DELETE FROM memories WHERE weight < ?")).run(threshold);
       return result.changes;
     });
   }
@@ -356,15 +332,11 @@ export class MemoryStore {
   async getStats(): Promise<MemoryStats> {
     await this.init();
     return this.withDb(async (db) => {
-      const memCount = await db.prepare("SELECT COUNT(*) as c FROM memories").get() as { c: number };
-      const taskCount = await db.prepare("SELECT COUNT(*) as c FROM tasks").get() as { c: number };
-      const avgScore = await db.prepare(
-        "SELECT AVG(task_score) as avg FROM tasks WHERE task_score IS NOT NULL"
-      ).get() as { avg: number | null };
+      const memCount = await (await db.prepare("SELECT COUNT(*) as c FROM memories")).get() as { c: number };
+      const taskCount = await (await db.prepare("SELECT COUNT(*) as c FROM tasks")).get() as { c: number };
+      const avgScore = await (await db.prepare("SELECT AVG(task_score) as avg FROM tasks WHERE task_score IS NOT NULL")).get() as { avg: number | null };
 
-      const topRows = await db.prepare(
-        "SELECT content, weight, retrieval_count FROM memories ORDER BY weight DESC LIMIT 10"
-      ).all() as any[];
+      const topRows = await (await db.prepare("SELECT content, weight, retrieval_count FROM memories ORDER BY weight DESC LIMIT 10")).all() as any[];
 
       return {
         totalMemories: memCount.c,
@@ -386,12 +358,12 @@ export class MemoryStore {
   async getTopByWeight(limit: number = 5): Promise<Memory[]> {
     await this.init();
     return this.withDb(async (db) => {
-      const rows = await db.prepare(`
+      const rows = await (await db.prepare(`
         SELECT id, content, category, weight, created_at, retrieval_count
         FROM memories
         ORDER BY weight DESC
         LIMIT ?
-      `).all(limit) as any[];
+      `)).all(limit) as any[];
 
       return rows.map((r: any) => ({
         id: r.id,
@@ -411,9 +383,7 @@ export class MemoryStore {
     const now = Math.floor(Date.now() / 1000);
 
     await this.withDb(async (db) => {
-      await db.prepare(
-        "INSERT INTO memories (id, content, embedding, category, weight, created_at, source_task) VALUES (?, ?, NULL, ?, ?, ?, ?)"
-      ).run(id, content, category, weight, now, this.currentTaskId);
+      await (await db.prepare("INSERT INTO memories (id, content, embedding, category, weight, created_at, source_task) VALUES (?, ?, NULL, ?, ?, ?, ?)")).run(id, content, category, weight, now, this.currentTaskId);
     });
 
     return id;
@@ -424,9 +394,7 @@ export class MemoryStore {
 
     // Read pending list with a short-lived connection
     const rows = await this.withDb(async (db) => {
-      return await db.prepare(
-        "SELECT id, content FROM memories WHERE embedding IS NULL"
-      ).all() as any[];
+      return await (await db.prepare("SELECT id, content FROM memories WHERE embedding IS NULL")).all() as any[];
     });
 
     if (rows.length === 0) return 0;
@@ -441,7 +409,7 @@ export class MemoryStore {
     // Write all embeddings back in one short connection
     await this.withDb(async (db) => {
       for (const e of embedded) {
-        await db.prepare("UPDATE memories SET embedding = ? WHERE id = ?").run(e.embedding, e.id);
+        await (await db.prepare("UPDATE memories SET embedding = ? WHERE id = ?")).run(e.embedding, e.id);
       }
     });
 
@@ -455,8 +423,8 @@ export class MemoryStore {
     await this.init();
 
     const deleted = await this.withDb(async (db) => {
-      const result = await db.prepare("DELETE FROM memories WHERE id = ?").run(memoryId);
-      await db.prepare("DELETE FROM memory_retrievals WHERE memory_id = ?").run(memoryId);
+      const result = await (await db.prepare("DELETE FROM memories WHERE id = ?")).run(memoryId);
+      await (await db.prepare("DELETE FROM memory_retrievals WHERE memory_id = ?")).run(memoryId);
       return result.changes > 0;
     });
 
@@ -466,9 +434,7 @@ export class MemoryStore {
       const id = randomUUID();
       const now = Math.floor(Date.now() / 1000);
       await this.withDb(async (db) => {
-        await db.prepare(
-          "INSERT INTO memories (id, content, embedding, category, weight, created_at, source_task) VALUES (?, ?, ?, 'correction', 2.0, ?, ?)"
-        ).run(id, correction, vecBuf(embedding), now, this.currentTaskId);
+        await (await db.prepare("INSERT INTO memories (id, content, embedding, category, weight, created_at, source_task) VALUES (?, ?, ?, 'correction', 2.0, ?, ?)")).run(id, correction, vecBuf(embedding), now, this.currentTaskId);
       });
       correctionId = id;
     }
@@ -479,9 +445,7 @@ export class MemoryStore {
   async penalizeMemory(memoryId: string, factor: number): Promise<void> {
     await this.init();
     await this.withDb(async (db) => {
-      await db.prepare(
-        "UPDATE memories SET weight = MAX(weight * ?, 0.1) WHERE id = ?"
-      ).run(factor, memoryId);
+      await (await db.prepare("UPDATE memories SET weight = MAX(weight * ?, 0.1) WHERE id = ?")).run(factor, memoryId);
     });
   }
 
