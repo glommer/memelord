@@ -1,6 +1,6 @@
 {
   "name": "memelord",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Persistent memory system for coding agents with reinforcement learning. Powered by Turso.",
   "type": "module",
   "main": "dist/index.js",
