@@ -18,7 +18,9 @@ async function withDb<T>(fn: (db: any) => Promise<T>): T extends never ? never :
     console.log("No memelord database found. Run 'memelord init' first.");
     process.exit(0);
   }
-  const db = await connect(dbPath);
+  const db = await connect(dbPath, {
+    experimental: ["multiprocess_wal"]
+  });
   await db.exec("PRAGMA busy_timeout = 5000");
   try {
     return await fn(db);
@@ -58,12 +60,10 @@ if (command === "hook") {
 
 } else if (command === "status") {
   await withDb(async (db) => {
-    const memCount = (await db.prepare("SELECT COUNT(*) as c FROM memories").get() as any).c;
-    const taskCount = (await db.prepare("SELECT COUNT(*) as c FROM tasks WHERE finished_at IS NOT NULL").get() as any).c;
-    const avgScore = (await db.prepare("SELECT AVG(task_score) as avg FROM tasks WHERE task_score IS NOT NULL").get() as any).avg;
-    const categories = await db.prepare(
-      "SELECT category, COUNT(*) as c FROM memories GROUP BY category ORDER BY c DESC"
-    ).all() as any[];
+    const memCount = (await (await db.prepare("SELECT COUNT(*) as c FROM memories")).get() as any).c;
+    const taskCount = (await (await db.prepare("SELECT COUNT(*) as c FROM tasks WHERE finished_at IS NOT NULL")).get() as any).c;
+    const avgScore = (await (await db.prepare("SELECT AVG(task_score) as avg FROM tasks WHERE task_score IS NOT NULL")).get() as any).avg;
+    const categories = await (await db.prepare("SELECT category, COUNT(*) as c FROM memories GROUP BY category ORDER BY c DESC")).all() as any[];
 
     console.log(`memelord status:`);
     console.log(`  Memories:  ${memCount}`);
@@ -71,9 +71,7 @@ if (command === "hook") {
     console.log(`  Avg score: ${avgScore?.toFixed(3) ?? "N/A"}`);
     console.log(`  By category: ${categories.map((r: any) => `${r.category}=${r.c}`).join(", ")}`);
 
-    const topMems = await db.prepare(
-      "SELECT content, weight, retrieval_count FROM memories ORDER BY weight DESC LIMIT 5"
-    ).all() as any[];
+    const topMems = await (await db.prepare("SELECT content, weight, retrieval_count FROM memories ORDER BY weight DESC LIMIT 5")).all() as any[];
 
     if (topMems.length > 0) {
       console.log(`\n  Top by weight:`);
@@ -96,7 +94,7 @@ if (command === "hook") {
     }
     query += " ORDER BY created_at DESC";
 
-    const rows = await db.prepare(query).all(...params) as any[];
+    const rows = await (await db.prepare(query)).all(...params) as any[];
 
     if (rows.length === 0) {
       console.log(filter ? `No ${filter} memories found.` : "No memories found.");
@@ -118,13 +116,13 @@ if (command === "hook") {
   await withDb(async (db) => {
     const limit = parseInt(process.argv[3] ?? "10");
 
-    const rows = await db.prepare(`
+    const rows = await (await db.prepare(`
       SELECT id, description, tokens_used, tool_calls, errors, user_corrections,
              completed, task_score, started_at, finished_at
       FROM tasks
       ORDER BY started_at DESC
       LIMIT ?
-    `).all(limit) as any[];
+    `)).all(limit) as any[];
 
     if (rows.length === 0) {
       console.log("No tasks found.");
@@ -144,13 +142,13 @@ if (command === "hook") {
       console.log(`[${status}] score=${score} | ${t.tokens_used ?? "?"}tok, ${t.tool_calls ?? "?"}calls, ${t.errors ?? 0}err, ${t.user_corrections ?? 0}corr | ${when}`);
       console.log(`  ${desc}`);
 
-      const retrievals = await db.prepare(`
+      const retrievals = await (await db.prepare(`
         SELECT r.memory_id, r.similarity, r.self_report, r.credit,
                substr(m.content, 1, 80) as preview, m.category
         FROM memory_retrievals r
         JOIN memories m ON r.memory_id = m.id
         WHERE r.task_id = ?
-      `).all(t.id) as any[];
+      `)).all(t.id) as any[];
 
       if (retrievals.length > 0) {
         for (const r of retrievals) {
@@ -160,10 +158,10 @@ if (command === "hook") {
         }
       }
 
-      const created = await db.prepare(`
+      const created = await (await db.prepare(`
         SELECT category, substr(content, 1, 60) as preview
         FROM memories WHERE source_task = ?
-      `).all(t.id) as any[];
+      `)).all(t.id) as any[];
 
       if (created.length > 0) {
         for (const c of created) {
@@ -181,11 +179,11 @@ if (command === "hook") {
 
     const events: { time: number; text: string }[] = [];
 
-    const tasks = await db.prepare(`
+    const tasks = await (await db.prepare(`
       SELECT description, task_score, tokens_used, tool_calls, errors,
              user_corrections, completed, started_at, finished_at
       FROM tasks ORDER BY started_at DESC LIMIT ?
-    `).all(limit) as any[];
+    `)).all(limit) as any[];
 
     for (const t of tasks) {
       const status = t.completed ? "OK" : "FAIL";
@@ -197,10 +195,10 @@ if (command === "hook") {
       });
     }
 
-    const mems = await db.prepare(`
+    const mems = await (await db.prepare(`
       SELECT content, category, weight, created_at
       FROM memories ORDER BY created_at DESC LIMIT ?
-    `).all(limit) as any[];
+    `)).all(limit) as any[];
 
     for (const m of mems) {
       events.push({
@@ -253,7 +251,7 @@ if (command === "hook") {
     process.exit(1);
   }
   await withDb(async (db) => {
-    const result = await db.prepare("DELETE FROM memories WHERE weight < ?").run(threshold);
+    const result = await (await db.prepare("DELETE FROM memories WHERE weight < ?")).run(threshold);
     console.log(`Purged ${result.changes} memories below weight ${threshold}`);
   });
 

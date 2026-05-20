@@ -25,7 +25,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "@tursodatabase/database": "^0.4.4",
+    "@tursodatabase/database": "^0.6.0",
     "@huggingface/transformers": "^3.4.0",
     "zod": "^3.24.0"
   },
