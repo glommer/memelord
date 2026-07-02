@@ -84,6 +84,7 @@ export class MemoryStore {
   private readonly topK: number;
   private readonly learningRate: number;
   private readonly decayRate: number;
+  private readonly encryption?: MemelordConfig["encryption"];
 
   constructor(config: MemelordConfig) {
     this.dbPath = config.dbPath;
@@ -93,6 +94,7 @@ export class MemoryStore {
     this.topK = config.topK ?? 5;
     this.learningRate = config.learningRate ?? 0.1;
     this.decayRate = config.decayRate ?? 0.995;
+    this.encryption = config.encryption;
   }
 
   /**
@@ -110,7 +112,8 @@ export class MemoryStore {
     for (let attempt = 0; ; attempt++) {
       try {
         db = await connect(this.dbPath, {
-          experimental: ["multiprocess_wal"]
+          experimental: ["multiprocess_wal"],
+          ...(this.encryption ? { encryption: this.encryption } : {})
         });
         break;
       } catch (e: any) {
