@@ -25,6 +25,21 @@ export interface MemelordConfig {
   learningRate?: number;
   /** Daily decay rate for unused memories (default: 0.995) */
   decayRate?: number;
+  /**
+   * Optional local encryption configuration for the underlying libSQL database.
+   * Supported ciphers mirror the libSQL embedded driver.
+   */
+  encryption?: {
+    cipher:
+      | "aes128gcm"
+      | "aes256gcm"
+      | "aegis256"
+      | "aegis256x2"
+      | "aegis128l"
+      | "aegis128x2"
+      | "aegis128x4";
+    hexkey: string;
+  };
 }
 
 export interface Memory {
